@@ -236,7 +236,10 @@ fn grade_hint(buttons: &[i64], next_reviews: &[String]) -> String {
             }
         }
     }
-    format!(" {}   r: replay   u: undo   d: decks   q: quit ", parts.join("  "))
+    format!(
+        " {}   space: good   r: replay   u: undo   d: decks   q: quit ",
+        parts.join("  ")
+    )
 }
 
 /// A one-line footer; shows a status/error message when present, else the hint.

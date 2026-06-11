@@ -239,6 +239,15 @@ impl App {
         }
     }
 
+    /// Space bar: reveal the answer if hidden, else grade Good (like Anki).
+    pub fn space(&mut self) {
+        if self.answer_shown {
+            self.grade(3);
+        } else {
+            self.show_answer();
+        }
+    }
+
     /// Reveal the answer side and play its audio.
     pub fn show_answer(&mut self) {
         if self.answer_shown || self.card.is_none() {

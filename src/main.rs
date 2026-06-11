@@ -73,7 +73,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         Screen::Review => match code {
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Char('d') if !ctrl => app.back_to_decks(),
-            KeyCode::Char(' ') => app.show_answer(),
+            KeyCode::Char(' ') => app.space(),
             KeyCode::Char('r') => app.replay_audio(),
             KeyCode::Char('u') => app.undo(),
             KeyCode::Char('j') | KeyCode::Down => app.scroll_down(),
