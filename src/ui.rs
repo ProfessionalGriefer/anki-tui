@@ -98,11 +98,11 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Paragraph::new(title), chunks[0]);
 
     if app.deck_finished {
-        let done = Paragraph::new("\n🎉 No more cards due in this deck.\n\nPress 'd' to go back to the deck list.")
+        let done = Paragraph::new("\n🎉 No more cards due in this deck.\n\nPress 'u' to undo the last card, or 'd' to go back to the deck list.")
             .alignment(ratatui::layout::Alignment::Center)
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(done, chunks[1]);
-        let hint = footer(" d: decks   q: quit ", app.status.as_deref());
+        let hint = footer(" u: undo   d: decks   q: quit ", app.status.as_deref());
         frame.render_widget(hint, chunks[2]);
         return;
     }
@@ -156,7 +156,7 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     let hint_text = if app.answer_shown {
         grade_hint(&card.buttons, &card.next_reviews)
     } else {
-        " space: show answer   j/k: scroll   r: replay audio   d: decks   q: quit ".to_string()
+        " space: show answer   j/k: scroll   r: replay   u: undo   d: decks   q: quit ".to_string()
     };
     let hint = footer(&hint_text, app.status.as_deref());
     frame.render_widget(hint, chunks[2]);
@@ -196,7 +196,7 @@ fn grade_hint(buttons: &[i64], next_reviews: &[String]) -> String {
             }
         }
     }
-    format!(" {}   r: replay   d: decks   q: quit ", parts.join("  "))
+    format!(" {}   r: replay   u: undo   d: decks   q: quit ", parts.join("  "))
 }
 
 /// A one-line footer; shows a status/error message when present, else the hint.

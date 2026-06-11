@@ -14,6 +14,7 @@ pub enum Screen {
 
 /// The card currently under review, with media for both sides.
 pub struct ReviewCard {
+    pub card_id: i64,
     pub question: SideMedia,
     pub answer: SideMedia,
     pub buttons: Vec<i64>,
@@ -39,6 +40,11 @@ pub struct App {
     pub answer_shown: bool,
     pub scroll: u16,
     pub deck_finished: bool,
+    /// The previously graded card, kept so `u` can restore and re-grade it.
+    pub prev_card: Option<ReviewCard>,
+    /// True while showing a restored (undone) card that is re-graded locally
+    /// via `answerCards` rather than the GUI reviewer.
+    pub undone: bool,
 
     /// Transient status / error message shown in the footer.
     pub status: Option<String>,
@@ -65,6 +71,8 @@ impl App {
             answer_shown: false,
             scroll: 0,
             deck_finished: false,
+            prev_card: None,
+            undone: false,
             status: None,
         should_quit: false,
         })
@@ -154,6 +162,8 @@ impl App {
         self.screen = Screen::Review;
         self.deck_finished = false;
         self.status = None;
+        self.prev_card = None;
+        self.undone = false;
         if let Err(e) = self.anki.gui_deck_review(&deck) {
             self.status = Some(e.to_string());
         }
@@ -163,6 +173,8 @@ impl App {
     pub fn back_to_decks(&mut self) {
         self.screen = Screen::DeckList;
         self.card = None;
+        self.prev_card = None;
+        self.undone = false;
         self.answer_shown = false;
         self.scroll = 0;
         self.refresh_decks();
@@ -174,11 +186,13 @@ impl App {
     pub fn load_current_card(&mut self) {
         self.answer_shown = false;
         self.scroll = 0;
+        self.undone = false;
         match self.anki.gui_current_card() {
             Ok(Some(c)) => {
                 let question = SideMedia::build(&c.question, &self.anki, &self.picker);
                 let answer = SideMedia::build(&c.answer, &self.anki, &self.picker);
                 let card = ReviewCard {
+                    card_id: c.card_id,
                     question,
                     answer,
                     buttons: c.buttons,
@@ -205,15 +219,18 @@ impl App {
         if self.answer_shown || self.card.is_none() {
             return;
         }
-        match self.anki.gui_show_answer() {
-            Ok(_) => {
-                self.answer_shown = true;
-                self.scroll = 0;
-                if let Some(card) = &self.card {
-                    card.answer.play_audio();
-                }
-            }
-            Err(e) => self.status = Some(e.to_string()),
+        // A restored (undone) card is shown from memory, not the GUI reviewer,
+        // so reveal it locally without touching the reviewer.
+        if !self.undone
+            && let Err(e) = self.anki.gui_show_answer()
+        {
+            self.status = Some(e.to_string());
+            return;
+        }
+        self.answer_shown = true;
+        self.scroll = 0;
+        if let Some(card) = &self.card {
+            card.answer.play_audio();
         }
     }
 
@@ -233,12 +250,60 @@ impl App {
             ));
             return;
         }
+        let card_id = card.card_id;
+
+        if self.undone {
+            // Re-grade the restored card by id; the GUI reviewer is sitting on
+            // the next card and is left untouched.
+            match self.anki.answer_cards(card_id, ease) {
+                Ok(_) => {
+                    self.status = None;
+                    self.undone = false;
+                    self.load_current_card();
+                }
+                Err(e) => self.status = Some(e.to_string()),
+            }
+            return;
+        }
+
         match self.anki.gui_answer_card(ease) {
             Ok(_) => {
                 self.status = None;
+                // Stash the just-graded card so `u` can restore it.
+                self.prev_card = self.card.take();
                 self.load_current_card();
             }
             Err(e) => self.status = Some(e.to_string()),
+        }
+    }
+
+    /// Undo the last grade: revert it in Anki and restore the card for re-grading.
+    pub fn undo(&mut self) {
+        if self.undone {
+            // Already showing the restored card.
+            return;
+        }
+        let Some(prev) = self.prev_card.take() else {
+            self.status = Some("Nothing to undo".to_string());
+            return;
+        };
+        match self.anki.gui_undo() {
+            Ok(true) => {
+                self.card = Some(prev);
+                self.undone = true;
+                self.answer_shown = false;
+                self.scroll = 0;
+                self.deck_finished = false;
+                self.status = Some("Undone — re-grade this card".to_string());
+            }
+            Ok(false) => {
+                self.prev_card = Some(prev);
+                self.status = Some("Nothing to undo".to_string());
+            }
+            Err(e) => {
+                self.prev_card = Some(prev);
+                self.status = Some(e.to_string());
+            }
         }
     }
 

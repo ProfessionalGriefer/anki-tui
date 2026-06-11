@@ -21,8 +21,6 @@ struct AnkiResponse {
 pub struct CurrentCard {
     pub question: String,
     pub answer: String,
-    // Part of the response; reviewing is driven through the GUI so we don't act on it.
-    #[allow(dead_code)]
     #[serde(rename = "cardId")]
     pub card_id: i64,
     /// Ease values that have a grading button (e.g. `[1, 3]` or `[1, 2, 3, 4]`).
@@ -108,6 +106,28 @@ impl AnkiConnect {
     pub fn gui_answer_card(&self, ease: i64) -> Result<bool> {
         let result = self.invoke("guiAnswerCard", json!({ "ease": ease }))?;
         Ok(result.as_bool().unwrap_or(false))
+    }
+
+    /// Undo the last reviewer action (e.g. an accidental grade). Returns `true`
+    /// if something was undone. Note: this reverts the collection but does NOT
+    /// move Anki's GUI reviewer back to the undone card.
+    pub fn gui_undo(&self) -> Result<bool> {
+        let result = self.invoke("guiUndo", Value::Null)?;
+        Ok(result.as_bool().unwrap_or(false))
+    }
+
+    /// Answer a specific card by id with the given ease, independent of the GUI
+    /// reviewer's current card. Returns `true` if the card existed.
+    pub fn answer_cards(&self, card_id: i64, ease: i64) -> Result<bool> {
+        let result = self.invoke(
+            "answerCards",
+            json!({ "answers": [{ "cardId": card_id, "ease": ease }] }),
+        )?;
+        Ok(result
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false))
     }
 
     /// Retrieve a media file's bytes by filename. Returns `None` if it doesn't exist.

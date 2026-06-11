@@ -68,6 +68,7 @@ fn handle_key(app: &mut App, code: KeyCode) {
             KeyCode::Char('d') => app.back_to_decks(),
             KeyCode::Char(' ') => app.show_answer(),
             KeyCode::Char('r') => app.replay_audio(),
+            KeyCode::Char('u') => app.undo(),
             KeyCode::Char('j') | KeyCode::Down => app.scroll_down(),
             KeyCode::Char('k') | KeyCode::Up => app.scroll_up(),
             KeyCode::Char('1') => app.grade(1),
