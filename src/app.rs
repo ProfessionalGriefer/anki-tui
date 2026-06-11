@@ -49,6 +49,8 @@ pub struct App {
     pub collapsed: HashSet<String>,
     /// When true, show a flat list of full deck names instead of the fold tree.
     pub flat_view: bool,
+    /// True after a lone `g`, so the next `g` completes a vim `gg` (jump to top).
+    pub pending_g: bool,
     /// Case-insensitive substring filter for the deck list.
     pub search: String,
     /// Whether the search input is currently capturing keystrokes.
@@ -92,6 +94,7 @@ impl App {
             deck_selected: 0,
             collapsed,
             flat_view: false,
+            pending_g: false,
             search: String::new(),
             searching: false,
             deck_name: String::new(),
@@ -166,6 +169,26 @@ impl App {
 
     pub fn select_prev_deck(&mut self) {
         self.deck_selected = self.deck_selected.saturating_sub(1);
+    }
+
+    /// Vim `gg`: jump to the first deck.
+    pub fn select_first(&mut self) {
+        self.deck_selected = 0;
+    }
+
+    /// Vim `G`: jump to the last visible deck.
+    pub fn select_last(&mut self) {
+        self.deck_selected = self.visible_decks().len().saturating_sub(1);
+    }
+
+    /// Handle a `g` press: complete `gg` (jump to top) or arm the next `g`.
+    pub fn press_g(&mut self) {
+        if self.pending_g {
+            self.select_first();
+            self.pending_g = false;
+        } else {
+            self.pending_g = true;
+        }
     }
 
     /// `l` / Right: expand a collapsed parent, otherwise review the deck.

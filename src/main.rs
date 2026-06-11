@@ -59,21 +59,29 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char(c) => app.push_search(c),
             _ => {}
         },
-        Screen::DeckList => match code {
-            KeyCode::Char('d') if ctrl => app.select_page_down(),
-            KeyCode::Char('u') if ctrl => app.select_page_up(),
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Char('y') => app.sync(),
-            KeyCode::Char('/') => app.start_search(),
-            KeyCode::Char('j') | KeyCode::Down => app.select_next_deck(),
-            KeyCode::Char('k') | KeyCode::Up => app.select_prev_deck(),
-            KeyCode::Char('l') | KeyCode::Right => app.expand_or_review(),
-            KeyCode::Char('h') | KeyCode::Left => app.collapse_or_parent(),
-            KeyCode::Char(',') => app.toggle_view(),
-            KeyCode::Enter => app.enter_review(),
-            KeyCode::Esc => app.cancel_search(),
-            _ => {}
-        },
+        Screen::DeckList => {
+            // Any key other than `g` cancels a pending vim `gg`.
+            if !matches!(code, KeyCode::Char('g')) {
+                app.pending_g = false;
+            }
+            match code {
+                KeyCode::Char('d') if ctrl => app.select_page_down(),
+                KeyCode::Char('u') if ctrl => app.select_page_up(),
+                KeyCode::Char('q') => app.should_quit = true,
+                KeyCode::Char('y') => app.sync(),
+                KeyCode::Char('/') => app.start_search(),
+                KeyCode::Char('g') if !ctrl => app.press_g(),
+                KeyCode::Char('G') => app.select_last(),
+                KeyCode::Char('j') | KeyCode::Down => app.select_next_deck(),
+                KeyCode::Char('k') | KeyCode::Up => app.select_prev_deck(),
+                KeyCode::Char('l') | KeyCode::Right => app.expand_or_review(),
+                KeyCode::Char('h') | KeyCode::Left => app.collapse_or_parent(),
+                KeyCode::Char(',') => app.toggle_view(),
+                KeyCode::Enter => app.enter_review(),
+                KeyCode::Esc => app.cancel_search(),
+                _ => {}
+            }
+        }
         Screen::Review => match code {
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Char('y') => app.sync(),
