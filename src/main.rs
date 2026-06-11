@@ -63,6 +63,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('d') if ctrl => app.select_page_down(),
             KeyCode::Char('u') if ctrl => app.select_page_up(),
             KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Char('y') => app.sync(),
             KeyCode::Char('/') => app.start_search(),
             KeyCode::Char('j') | KeyCode::Down => app.select_next_deck(),
             KeyCode::Char('k') | KeyCode::Up => app.select_prev_deck(),
@@ -72,6 +73,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         },
         Screen::Review => match code {
             KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Char('y') => app.sync(),
             KeyCode::Char('d') if !ctrl => app.back_to_decks(),
             KeyCode::Char(' ') => app.space(),
             KeyCode::Char('r') => app.replay_audio(),

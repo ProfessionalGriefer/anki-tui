@@ -166,6 +166,12 @@ impl AnkiConnect {
             .unwrap_or(false))
     }
 
+    /// Synchronize the local collection with AnkiWeb (uses Anki's saved login).
+    pub fn sync(&self) -> Result<()> {
+        self.invoke("sync", Value::Null)?;
+        Ok(())
+    }
+
     /// Retrieve a media file's bytes by filename. Returns `None` if it doesn't exist.
     pub fn retrieve_media_file(&self, filename: &str) -> Result<Option<Vec<u8>>> {
         use base64::Engine;

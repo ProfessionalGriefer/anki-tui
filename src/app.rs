@@ -113,6 +113,19 @@ impl App {
         self.deck_selected = self.deck_selected.saturating_sub(1);
     }
 
+    /// Sync the collection with AnkiWeb, then refresh deck counts.
+    pub fn sync(&mut self) {
+        match self.anki.sync() {
+            Ok(()) => {
+                if matches!(self.screen, Screen::DeckList) {
+                    self.refresh_decks();
+                }
+                self.status = Some("Synced with AnkiWeb".to_string());
+            }
+            Err(e) => self.status = Some(e.to_string()),
+        }
+    }
+
     /// Vim `Ctrl-d`: jump the selection down by half a page.
     pub fn select_page_down(&mut self) {
         let len = self.filtered_decks().len();

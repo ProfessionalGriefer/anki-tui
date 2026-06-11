@@ -78,7 +78,7 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Paragraph::new(search_line), chunks[1]);
     } else {
         let hint = footer(
-            " j/k: move   l/Enter: review   /: search   q: quit ",
+            " j/k: move   l/Enter: review   /: search   y: sync   q: quit ",
             app.status.as_deref(),
         );
         frame.render_widget(hint, chunks[1]);
@@ -196,7 +196,8 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     let hint_text = if app.answer_shown {
         grade_hint(&card.buttons, &card.next_reviews)
     } else {
-        " space: show answer   j/k: scroll   r: replay   u: undo   d: decks   q: quit ".to_string()
+        " space: show answer   j/k: scroll   r: replay   u: undo   y: sync   d: decks   q: quit "
+            .to_string()
     };
     let hint = footer(&hint_text, app.status.as_deref());
     frame.render_widget(hint, chunks[2]);
