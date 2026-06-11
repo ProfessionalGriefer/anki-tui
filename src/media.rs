@@ -11,8 +11,8 @@ use crate::anki::AnkiConnect;
 
 /// Everything renderable/playable for one side of a card.
 pub struct SideMedia {
-    /// Plain text with HTML tags and media tokens stripped out.
-    pub text: String,
+    /// Card HTML with media tokens removed, rendered to text on demand.
+    html: String,
     /// Decoded, terminal-ready image protocols (re-encoded on resize).
     pub images: Vec<StatefulProtocol>,
     /// Paths to audio files written to a temp dir, ready for the player.
@@ -24,29 +24,42 @@ impl SideMedia {
     pub fn build(html: &str, anki: &AnkiConnect, picker: &Picker) -> Self {
         let image_files = extract_images(html);
         let audio_files = extract_audio(html);
-        let text = strip_html(html);
+        // Drop media tokens so html2text doesn't emit `[sound:…]` / image alt text.
+        let cleaned = strip_media_tokens(html);
 
         let mut images = Vec::new();
         for name in image_files {
             if let Ok(Some(bytes)) = anki.retrieve_media_file(&name)
-                && let Ok(img) = image::load_from_memory(&bytes) {
-                    images.push(picker.new_resize_protocol(img));
-                }
+                && let Ok(img) = image::load_from_memory(&bytes)
+            {
+                images.push(picker.new_resize_protocol(img));
+            }
         }
 
         let mut audio = Vec::new();
         for name in audio_files {
             if let Ok(Some(bytes)) = anki.retrieve_media_file(&name)
-                && let Ok(path) = write_temp(&name, &bytes) {
-                    audio.push(path);
-                }
+                && let Ok(path) = write_temp(&name, &bytes)
+            {
+                audio.push(path);
+            }
         }
 
         SideMedia {
-            text,
+            html: cleaned,
             images,
             audio,
         }
+    }
+
+    /// Render the card text to terminal-friendly plain text, wrapped to `width`
+    /// columns. Uses html2text, which handles tags, entities, lists, tables and
+    /// drops `<style>`/`<script>` blocks.
+    pub fn to_text(&self, width: u16) -> String {
+        let width = width.max(10) as usize;
+        html2text::config::plain()
+            .string_from_read(self.html.as_bytes(), width)
+            .unwrap_or_else(|_| self.html.clone())
     }
 
     /// Play every audio clip on this side (used on reveal and for the `r` key).
@@ -114,108 +127,42 @@ fn attr_value(tag: &str, attr: &str) -> Option<String> {
     }
 }
 
-/// Strip HTML tags and media tokens, normalize whitespace, decode basic entities.
-fn strip_html(html: &str) -> String {
-    // Drop sound tokens first.
+/// Remove media tokens that html2text would otherwise render as stray text:
+/// `[sound:…]` references and `<img>` tags (we render images separately).
+fn strip_media_tokens(html: &str) -> String {
+    // Remove [sound:…] tokens.
     let mut s = String::with_capacity(html.len());
     let mut rest = html;
     while let Some(start) = rest.find("[sound:") {
         s.push_str(&rest[..start]);
-        if let Some(end) = rest[start..].find(']') {
-            rest = &rest[start + end + 1..];
-        } else {
-            rest = "";
-            break;
+        match rest[start..].find(']') {
+            Some(end) => rest = &rest[start + end + 1..],
+            None => {
+                rest = "";
+                break;
+            }
         }
     }
     s.push_str(rest);
 
-    // Convert block-ish tags to newlines, then remove all tags.
+    // Remove <img …> tags.
+    let lower = s.to_ascii_lowercase();
     let mut out = String::with_capacity(s.len());
-    let mut in_tag = false;
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '<' => {
-                in_tag = true;
-                // Peek tag name to insert a newline for common block elements.
-                let mut name = String::new();
-                while let Some(&p) = chars.peek() {
-                    if p.is_ascii_alphabetic() || p == '/' {
-                        name.push(p.to_ascii_lowercase());
-                        chars.next();
-                    } else {
-                        break;
-                    }
+    let mut i = 0;
+    while i < s.len() {
+        if lower[i..].starts_with("<img") {
+            match s[i..].find('>') {
+                Some(end) => {
+                    i += end + 1;
+                    continue;
                 }
-                if matches!(
-                    name.as_str(),
-                    "br" | "/br" | "p" | "/p" | "div" | "/div" | "hr" | "tr" | "/tr" | "li"
-                )
-                    && !out.ends_with('\n') {
-                        out.push('\n');
-                    }
-            }
-            '>' => in_tag = false,
-            _ if in_tag => {}
-            _ => out.push(c),
-        }
-    }
-
-    let decoded = decode_entities(&out);
-    // Collapse runs of blank lines and trim each line's trailing spaces.
-    let mut lines: Vec<String> = decoded
-        .lines()
-        .map(|l| l.trim_end().to_string())
-        .collect();
-    while lines.first().is_some_and(|l| l.trim().is_empty()) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(|l| l.trim().is_empty()) {
-        lines.pop();
-    }
-    lines.join("\n")
-}
-
-/// Decode the handful of HTML entities common in Anki cards.
-fn decode_entities(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(amp) = rest.find('&') {
-        out.push_str(&rest[..amp]);
-        let after = &rest[amp..];
-        if let Some(semi) = after.find(';').filter(|&i| i <= 8) {
-            let entity = &after[1..semi];
-            let replacement = match entity {
-                "nbsp" => Some(" ".to_string()),
-                "amp" => Some("&".to_string()),
-                "lt" => Some("<".to_string()),
-                "gt" => Some(">".to_string()),
-                "quot" => Some("\"".to_string()),
-                "apos" | "#39" => Some("'".to_string()),
-                _ if entity.starts_with("#x") || entity.starts_with("#X") => {
-                    u32::from_str_radix(&entity[2..], 16)
-                        .ok()
-                        .and_then(char::from_u32)
-                        .map(|c| c.to_string())
-                }
-                _ if entity.starts_with('#') => entity[1..]
-                    .parse::<u32>()
-                    .ok()
-                    .and_then(char::from_u32)
-                    .map(|c| c.to_string()),
-                _ => None,
-            };
-            if let Some(r) = replacement {
-                out.push_str(&r);
-                rest = &after[semi + 1..];
-                continue;
+                None => break,
             }
         }
-        out.push('&');
-        rest = &after[1..];
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
     }
-    out.push_str(rest);
     out
 }
 
@@ -263,19 +210,29 @@ mod tests {
     }
 
     #[test]
-    fn strips_tags_and_sound_tokens() {
-        let html = "<p>Hello&nbsp;world</p><br>line2 [sound:x.mp3]<img src=\"a.jpg\">";
-        let text = strip_html(html);
-        assert!(text.contains("Hello world"));
-        assert!(text.contains("line2"));
-        assert!(!text.contains("[sound:"));
-        assert!(!text.contains("<"));
+    fn strips_media_tokens() {
+        let html = "Hello [sound:x.mp3] <img src=\"a.jpg\"> world";
+        let cleaned = strip_media_tokens(html);
+        assert!(!cleaned.contains("[sound:"));
+        assert!(!cleaned.contains("<img"));
+        assert!(cleaned.contains("Hello"));
+        assert!(cleaned.contains("world"));
     }
 
     #[test]
-    fn decodes_entities() {
-        assert_eq!(decode_entities("a &amp; b &lt;c&gt; &#65;"), "a & b <c> A");
-        // Unknown entities are left intact.
-        assert_eq!(decode_entities("100% &bogus; ok"), "100% &bogus; ok");
+    fn to_text_renders_html_and_drops_style() {
+        let side = SideMedia {
+            html: strip_media_tokens(
+                "<style>.card { color: red; }</style><p>Hello&nbsp;world</p>",
+            ),
+            images: Vec::new(),
+            audio: Vec::new(),
+        };
+        let text = side.to_text(40);
+        // &nbsp; decodes to U+00A0, so check the words individually.
+        assert!(text.contains("Hello"));
+        assert!(text.contains("world"));
+        assert!(!text.contains("color"));
+        assert!(!text.contains("<"));
     }
 }

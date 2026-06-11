@@ -114,7 +114,10 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     let text_block = Block::default()
         .borders(Borders::ALL)
         .title(if app.answer_shown { " Answer " } else { " Question " });
-    let paragraph = Paragraph::new(side.text.as_str())
+    // Render the HTML to text wrapped to the block's inner width.
+    let text_width = body_chunks[0].width.saturating_sub(2);
+    let text = side.to_text(text_width);
+    let paragraph = Paragraph::new(text)
         .block(text_block)
         .wrap(Wrap { trim: false })
         .scroll((app.scroll, 0));
