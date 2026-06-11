@@ -10,8 +10,9 @@ use ratatui_image::StatefulImage;
 use crate::anki::DeckCounts;
 use crate::app::{App, GRADE_LABELS, Screen};
 
-/// Width reserved by the list's highlight symbol (`"▶ "`).
-const HIGHLIGHT_WIDTH: u16 = 2;
+/// Width reserved by the list's highlight gutter (selection shown via bg color,
+/// so the fold arrows aren't shifted).
+const HIGHLIGHT_WIDTH: u16 = 0;
 /// Width of each right-aligned count column.
 const COUNT_WIDTH: usize = 5;
 
@@ -28,12 +29,31 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
-    let filtered = app.filtered_decks();
+    let filtered = app.visible_decks();
     // Width available for a row: inner area minus the borders and highlight gutter.
     let row_width = chunks[0].width.saturating_sub(2 + HIGHLIGHT_WIDTH);
+    let searching = !app.search.is_empty();
     let items: Vec<ListItem> = filtered
         .iter()
-        .map(|d| ListItem::new(deck_row(&d.name, &d.counts, row_width)))
+        .map(|d| {
+            if app.flat_view {
+                // Flat view: full deck names, no indentation or fold markers.
+                ListItem::new(deck_row(&d.name, 0, "", &d.counts, row_width))
+            } else {
+                // Fold marker: ▶ collapsed, ▼ expanded, blank for leaves. While
+                // searching the tree is flattened, so don't show collapse arrows.
+                let marker = if d.has_children {
+                    if !searching && app.collapsed.contains(&d.name) {
+                        "▶ "
+                    } else {
+                        "▼ "
+                    }
+                } else {
+                    "  "
+                };
+                ListItem::new(deck_row(&d.label, d.depth, marker, &d.counts, row_width))
+            }
+        })
         .collect();
 
     // Title reflects the active filter and match count.
@@ -54,8 +74,7 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
                 .bg(Color::Blue)
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
+        );
 
     let mut state = ListState::default();
     if !filtered.is_empty() {
@@ -78,25 +97,27 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Paragraph::new(search_line), chunks[1]);
     } else {
         let hint = footer(
-            " j/k: move   l/Enter: review   /: search   y: sync   q: quit ",
+            " j/k: move   h/l: fold   ,: flat/tree   Enter: review   /: search   y: sync   q: quit ",
             app.status.as_deref(),
         );
         frame.render_widget(hint, chunks[1]);
     }
 }
 
-/// Build a deck-list row: the name on the left, then right-aligned new/learn/
-/// review counts colored like Anki (new = blue, learn = red, review = green).
-fn deck_row(name: &str, counts: &DeckCounts, width: u16) -> Line<'static> {
+/// Build a deck-list row: indentation + fold marker + label on the left, then
+/// right-aligned new/learn/review counts colored like Anki (new = blue,
+/// learn = red, review = green).
+fn deck_row(label: &str, depth: usize, marker: &str, counts: &DeckCounts, width: u16) -> Line<'static> {
     let counts_width = COUNT_WIDTH * 3;
     let name_width = (width as usize).saturating_sub(counts_width).max(1);
 
-    // Truncate the name with an ellipsis if it doesn't fit, else pad it.
-    let name_field = if name.chars().count() > name_width {
-        let kept: String = name.chars().take(name_width.saturating_sub(1)).collect();
+    let left = format!("{}{}{}", "  ".repeat(depth), marker, label);
+    // Truncate with an ellipsis if it doesn't fit, else pad to the column width.
+    let name_field = if left.chars().count() > name_width {
+        let kept: String = left.chars().take(name_width.saturating_sub(1)).collect();
         format!("{kept}…")
     } else {
-        format!("{name:<name_width$}")
+        format!("{left:<name_width$}")
     };
 
     Line::from(vec![

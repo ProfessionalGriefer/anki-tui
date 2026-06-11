@@ -1,5 +1,8 @@
 //! Application state machine: deck list and review screens.
 
+use std::collections::HashSet;
+use std::path::PathBuf;
+
 use anyhow::Result;
 use ratatui_image::picker::Picker;
 
@@ -14,7 +17,14 @@ pub enum Screen {
 
 /// A deck plus its new/learn/review counts for the overview.
 pub struct DeckInfo {
+    /// Full `A::B::C` name.
     pub name: String,
+    /// Last `::` component, shown in the tree.
+    pub label: String,
+    /// Nesting depth (number of `::` separators).
+    pub depth: usize,
+    /// Whether any other deck is nested under this one.
+    pub has_children: bool,
     pub counts: DeckCounts,
 }
 
@@ -35,6 +45,10 @@ pub struct App {
     // Deck list state.
     pub decks: Vec<DeckInfo>,
     pub deck_selected: usize,
+    /// Full names of decks whose children are folded away. Persisted to disk.
+    pub collapsed: HashSet<String>,
+    /// When true, show a flat list of full deck names instead of the fold tree.
+    pub flat_view: bool,
     /// Case-insensitive substring filter for the deck list.
     pub search: String,
     /// Whether the search input is currently capturing keystrokes.
@@ -67,12 +81,17 @@ impl App {
     pub fn new(picker: Picker) -> Result<Self> {
         let anki = AnkiConnect::new();
         let decks = load_decks(&anki)?;
+        // Restore the saved fold state, or default to collapsing every parent
+        // (so only top-level decks show on first launch).
+        let collapsed = load_collapsed().unwrap_or_else(|| default_collapsed(&decks));
         Ok(Self {
             anki,
             picker,
             screen: Screen::DeckList,
             decks,
             deck_selected: 0,
+            collapsed,
+            flat_view: false,
             search: String::new(),
             searching: false,
             deck_name: String::new(),
@@ -89,21 +108,57 @@ impl App {
 
     // ----- Deck list -----
 
-    /// Decks matching the current search filter, in display order.
-    pub fn filtered_decks(&self) -> Vec<&DeckInfo> {
-        if self.search.is_empty() {
-            self.decks.iter().collect()
-        } else {
+    /// Decks currently shown: filtered by the search query, or (when not
+    /// searching) hiding any deck whose ancestor is collapsed.
+    pub fn visible_decks(&self) -> Vec<&DeckInfo> {
+        if !self.search.is_empty() {
             let query = self.search.to_lowercase();
             self.decks
                 .iter()
                 .filter(|d| d.name.to_lowercase().contains(&query))
                 .collect()
+        } else if self.flat_view {
+            self.decks.iter().collect()
+        } else {
+            self.decks
+                .iter()
+                .filter(|d| !self.ancestor_collapsed(&d.name))
+                .collect()
         }
     }
 
+    /// `,`: toggle between the fold tree and a flat list of full deck names,
+    /// keeping the same deck selected across the switch.
+    pub fn toggle_view(&mut self) {
+        let current = self
+            .visible_decks()
+            .get(self.deck_selected)
+            .map(|d| d.name.clone());
+        self.flat_view = !self.flat_view;
+        match current.and_then(|name| self.visible_decks().iter().position(|d| d.name == name)) {
+            Some(idx) => self.deck_selected = idx,
+            None => self.clamp_selection(),
+        }
+    }
+
+    /// True if any strict ancestor of `name` is in the collapsed set.
+    fn ancestor_collapsed(&self, name: &str) -> bool {
+        let parts: Vec<&str> = name.split("::").collect();
+        let mut prefix = String::new();
+        for part in &parts[..parts.len().saturating_sub(1)] {
+            if !prefix.is_empty() {
+                prefix.push_str("::");
+            }
+            prefix.push_str(part);
+            if self.collapsed.contains(&prefix) {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn select_next_deck(&mut self) {
-        let len = self.filtered_decks().len();
+        let len = self.visible_decks().len();
         if len > 0 {
             self.deck_selected = (self.deck_selected + 1).min(len - 1);
         }
@@ -111,6 +166,48 @@ impl App {
 
     pub fn select_prev_deck(&mut self) {
         self.deck_selected = self.deck_selected.saturating_sub(1);
+    }
+
+    /// `l` / Right: expand a collapsed parent, otherwise review the deck.
+    pub fn expand_or_review(&mut self) {
+        let visible = self.visible_decks();
+        let Some(d) = visible.get(self.deck_selected) else {
+            return;
+        };
+        let name = d.name.clone();
+        let has_children = d.has_children;
+        drop(visible);
+        if has_children && self.collapsed.contains(&name) {
+            self.collapsed.remove(&name);
+            self.save_collapsed();
+        } else {
+            self.enter_review();
+        }
+    }
+
+    /// `h` / Left: collapse an expanded parent, otherwise jump to the parent deck.
+    pub fn collapse_or_parent(&mut self) {
+        let visible = self.visible_decks();
+        let Some(d) = visible.get(self.deck_selected) else {
+            return;
+        };
+        let name = d.name.clone();
+        let has_children = d.has_children;
+        drop(visible);
+        if has_children && !self.collapsed.contains(&name) {
+            self.collapsed.insert(name);
+            self.save_collapsed();
+        } else if let Some(pos) = name.rfind("::") {
+            let parent = name[..pos].to_string();
+            if let Some(idx) = self.visible_decks().iter().position(|x| x.name == parent) {
+                self.deck_selected = idx;
+            }
+        }
+    }
+
+    /// Persist the current fold state to disk.
+    fn save_collapsed(&self) {
+        save_collapsed(&self.collapsed);
     }
 
     /// Sync the collection with AnkiWeb, then refresh deck counts.
@@ -128,7 +225,7 @@ impl App {
 
     /// Vim `Ctrl-d`: jump the selection down by half a page.
     pub fn select_page_down(&mut self) {
-        let len = self.filtered_decks().len();
+        let len = self.visible_decks().len();
         if len > 0 {
             self.deck_selected = (self.deck_selected + PAGE_JUMP).min(len - 1);
         }
@@ -168,9 +265,9 @@ impl App {
         self.deck_selected = 0;
     }
 
-    /// Clamp the selection to the current filtered list length.
+    /// Clamp the selection to the current visible list length.
     fn clamp_selection(&mut self) {
-        let len = self.filtered_decks().len();
+        let len = self.visible_decks().len();
         if self.deck_selected >= len {
             self.deck_selected = len.saturating_sub(1);
         }
@@ -190,7 +287,7 @@ impl App {
     /// Start reviewing the highlighted deck.
     pub fn enter_review(&mut self) {
         let Some(deck) = self
-            .filtered_decks()
+            .visible_decks()
             .get(self.deck_selected)
             .map(|d| d.name.clone())
         else {
@@ -381,13 +478,71 @@ fn load_decks(anki: &AnkiConnect) -> Result<Vec<DeckInfo>> {
     // Counts are best-effort; fall back to zeros if the stats call fails.
     let stats = anki.deck_stats(&names).unwrap_or_default();
 
+    // Every full name that is a strict prefix of another deck has children.
+    let mut parents: HashSet<String> = HashSet::new();
+    for name in &names {
+        let parts: Vec<&str> = name.split("::").collect();
+        let mut prefix = String::new();
+        for part in &parts[..parts.len().saturating_sub(1)] {
+            if !prefix.is_empty() {
+                prefix.push_str("::");
+            }
+            prefix.push_str(part);
+            parents.insert(prefix.clone());
+        }
+    }
+
     let mut decks: Vec<DeckInfo> = names_and_ids
         .into_iter()
-        .map(|(name, id)| DeckInfo {
-            name,
-            counts: stats.get(&id).copied().unwrap_or_default(),
+        .map(|(name, id)| {
+            let label = name.rsplit("::").next().unwrap_or(&name).to_string();
+            let depth = name.matches("::").count();
+            DeckInfo {
+                has_children: parents.contains(&name),
+                label,
+                depth,
+                counts: stats.get(&id).copied().unwrap_or_default(),
+                name,
+            }
         })
         .collect();
     decks.sort_by_key(|d| d.name.to_lowercase());
     Ok(decks)
+}
+
+/// Default fold state: collapse every parent so only top-level decks show.
+fn default_collapsed(decks: &[DeckInfo]) -> HashSet<String> {
+    decks
+        .iter()
+        .filter(|d| d.has_children)
+        .map(|d| d.name.clone())
+        .collect()
+}
+
+/// Path of the persisted fold-state file (`$XDG_STATE_HOME` or `~/.local/state`).
+fn collapsed_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    Some(base.join("anki-tui").join("collapsed.json"))
+}
+
+/// Load the persisted set of collapsed deck names, if any.
+fn load_collapsed() -> Option<HashSet<String>> {
+    let data = std::fs::read_to_string(collapsed_path()?).ok()?;
+    let names: Vec<String> = serde_json::from_str(&data).ok()?;
+    Some(names.into_iter().collect())
+}
+
+/// Write the collapsed deck names to disk (best-effort).
+fn save_collapsed(collapsed: &HashSet<String>) {
+    let Some(path) = collapsed_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut names: Vec<&String> = collapsed.iter().collect();
+    names.sort();
+    if let Ok(json) = serde_json::to_string_pretty(&names) {
+        let _ = std::fs::write(path, json);
+    }
 }
