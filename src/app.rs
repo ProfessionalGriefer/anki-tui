@@ -28,6 +28,10 @@ pub struct App {
     // Deck list state.
     pub decks: Vec<String>,
     pub deck_selected: usize,
+    /// Case-insensitive substring filter for the deck list.
+    pub search: String,
+    /// Whether the search input is currently capturing keystrokes.
+    pub searching: bool,
 
     // Review state.
     pub deck_name: String,
@@ -54,6 +58,8 @@ impl App {
             screen: Screen::DeckList,
             decks,
             deck_selected: 0,
+            search: String::new(),
+            searching: false,
             deck_name: String::new(),
             card: None,
             answer_shown: false,
@@ -66,9 +72,23 @@ impl App {
 
     // ----- Deck list -----
 
+    /// Deck names matching the current search filter, in display order.
+    pub fn filtered_decks(&self) -> Vec<&String> {
+        if self.search.is_empty() {
+            self.decks.iter().collect()
+        } else {
+            let query = self.search.to_lowercase();
+            self.decks
+                .iter()
+                .filter(|d| d.to_lowercase().contains(&query))
+                .collect()
+        }
+    }
+
     pub fn select_next_deck(&mut self) {
-        if !self.decks.is_empty() {
-            self.deck_selected = (self.deck_selected + 1).min(self.decks.len() - 1);
+        let len = self.filtered_decks().len();
+        if len > 0 {
+            self.deck_selected = (self.deck_selected + 1).min(len - 1);
         }
     }
 
@@ -76,14 +96,49 @@ impl App {
         self.deck_selected = self.deck_selected.saturating_sub(1);
     }
 
+    /// Begin capturing keystrokes into the search filter.
+    pub fn start_search(&mut self) {
+        self.searching = true;
+    }
+
+    /// Append a character to the search filter and reset the selection.
+    pub fn push_search(&mut self, c: char) {
+        self.search.push(c);
+        self.deck_selected = 0;
+    }
+
+    /// Delete the last search character and reset the selection.
+    pub fn backspace_search(&mut self) {
+        self.search.pop();
+        self.deck_selected = 0;
+    }
+
+    /// Keep the current filter but stop capturing keystrokes.
+    pub fn confirm_search(&mut self) {
+        self.searching = false;
+    }
+
+    /// Clear the filter and stop capturing keystrokes.
+    pub fn cancel_search(&mut self) {
+        self.searching = false;
+        self.search.clear();
+        self.deck_selected = 0;
+    }
+
+    /// Clamp the selection to the current filtered list length.
+    fn clamp_selection(&mut self) {
+        let len = self.filtered_decks().len();
+        if self.deck_selected >= len {
+            self.deck_selected = len.saturating_sub(1);
+        }
+    }
+
     /// Reload the deck list (e.g. when returning from review).
     pub fn refresh_decks(&mut self) {
         match load_sorted_decks(&self.anki) {
             Ok(decks) => {
                 self.decks = decks;
-                if self.deck_selected >= self.decks.len() {
-                    self.deck_selected = self.decks.len().saturating_sub(1);
-                }
+                self.clamp_selection();
             }
             Err(e) => self.status = Some(e.to_string()),
         }
@@ -91,7 +146,8 @@ impl App {
 
     /// Start reviewing the highlighted deck.
     pub fn enter_review(&mut self) {
-        let Some(deck) = self.decks.get(self.deck_selected).cloned() else {
+        let Some(deck) = self.filtered_decks().get(self.deck_selected).map(|d| (*d).clone())
+        else {
             return;
         };
         self.deck_name = deck.clone();

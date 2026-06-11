@@ -22,17 +22,23 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(frame.area());
 
-    let items: Vec<ListItem> = app
-        .decks
+    let filtered = app.filtered_decks();
+    let items: Vec<ListItem> = filtered
         .iter()
         .map(|d| ListItem::new(d.as_str()))
         .collect();
 
+    // Title reflects the active filter and match count.
+    let title = if app.search.is_empty() {
+        format!(" Decks ({}) ", filtered.len())
+    } else {
+        format!(" Decks ({}) — /{} ", filtered.len(), app.search)
+    };
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Decks ")
+                .title(title)
                 .title_style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .highlight_style(
@@ -44,13 +50,31 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         .highlight_symbol("▶ ");
 
     let mut state = ListState::default();
-    if !app.decks.is_empty() {
+    if !filtered.is_empty() {
         state.select(Some(app.deck_selected));
     }
     frame.render_stateful_widget(list, chunks[0], &mut state);
 
-    let hint = footer(" j/k: move   l/Enter: review   q: quit ", app.status.as_deref());
-    frame.render_widget(hint, chunks[1]);
+    // Footer: live search prompt while typing, else key hints.
+    if app.searching {
+        let search_line = Line::from(vec![
+            Span::styled("/", Style::default().fg(Color::Yellow)),
+            Span::raw(app.search.as_str()),
+            Span::styled("█", Style::default().fg(Color::Yellow)),
+            Span::raw("   "),
+            Span::styled(
+                "Enter: keep  Esc: clear",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(search_line), chunks[1]);
+    } else {
+        let hint = footer(
+            " j/k: move   l/Enter: review   /: search   q: quit ",
+            app.status.as_deref(),
+        );
+        frame.render_widget(hint, chunks[1]);
+    }
 }
 
 fn render_review(frame: &mut Frame, app: &mut App) {

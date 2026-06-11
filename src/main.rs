@@ -43,20 +43,28 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
 }
 
 fn handle_key(app: &mut App, code: KeyCode) {
-    // `q` quits from anywhere.
-    if let KeyCode::Char('q') = code {
-        app.should_quit = true;
-        return;
-    }
-
     match app.screen {
+        // While searching, keystrokes edit the filter rather than triggering commands.
+        Screen::DeckList if app.searching => match code {
+            KeyCode::Esc => app.cancel_search(),
+            KeyCode::Enter => app.confirm_search(),
+            KeyCode::Backspace => app.backspace_search(),
+            KeyCode::Down => app.select_next_deck(),
+            KeyCode::Up => app.select_prev_deck(),
+            KeyCode::Char(c) => app.push_search(c),
+            _ => {}
+        },
         Screen::DeckList => match code {
+            KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Char('/') => app.start_search(),
             KeyCode::Char('j') | KeyCode::Down => app.select_next_deck(),
             KeyCode::Char('k') | KeyCode::Up => app.select_prev_deck(),
             KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => app.enter_review(),
+            KeyCode::Esc => app.cancel_search(),
             _ => {}
         },
         Screen::Review => match code {
+            KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Char('d') => app.back_to_decks(),
             KeyCode::Char(' ') => app.show_answer(),
             KeyCode::Char('r') => app.replay_audio(),
