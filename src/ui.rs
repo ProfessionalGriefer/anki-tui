@@ -7,7 +7,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui_image::StatefulImage;
 
+use crate::anki::DeckCounts;
 use crate::app::{App, GRADE_LABELS, Screen};
+
+/// Width reserved by the list's highlight symbol (`"▶ "`).
+const HIGHLIGHT_WIDTH: u16 = 2;
+/// Width of each right-aligned count column.
+const COUNT_WIDTH: usize = 5;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     match app.screen {
@@ -23,9 +29,11 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         .split(frame.area());
 
     let filtered = app.filtered_decks();
+    // Width available for a row: inner area minus the borders and highlight gutter.
+    let row_width = chunks[0].width.saturating_sub(2 + HIGHLIGHT_WIDTH);
     let items: Vec<ListItem> = filtered
         .iter()
-        .map(|d| ListItem::new(d.as_str()))
+        .map(|d| ListItem::new(deck_row(&d.name, &d.counts, row_width)))
         .collect();
 
     // Title reflects the active filter and match count.
@@ -75,6 +83,38 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         );
         frame.render_widget(hint, chunks[1]);
     }
+}
+
+/// Build a deck-list row: the name on the left, then right-aligned new/learn/
+/// review counts colored like Anki (new = blue, learn = red, review = green).
+fn deck_row(name: &str, counts: &DeckCounts, width: u16) -> Line<'static> {
+    let counts_width = COUNT_WIDTH * 3;
+    let name_width = (width as usize).saturating_sub(counts_width).max(1);
+
+    // Truncate the name with an ellipsis if it doesn't fit, else pad it.
+    let name_field = if name.chars().count() > name_width {
+        let kept: String = name.chars().take(name_width.saturating_sub(1)).collect();
+        format!("{kept}…")
+    } else {
+        format!("{name:<name_width$}")
+    };
+
+    Line::from(vec![
+        Span::raw(name_field),
+        count_span(counts.new, Color::Blue),
+        count_span(counts.learn, Color::Red),
+        count_span(counts.review, Color::Green),
+    ])
+}
+
+/// A right-aligned count cell; zero is dimmed so non-zero counts stand out.
+fn count_span(n: u32, color: Color) -> Span<'static> {
+    let style = if n == 0 {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(color)
+    };
+    Span::styled(format!("{n:>w$}", w = COUNT_WIDTH), style)
 }
 
 fn render_review(frame: &mut Frame, app: &mut App) {

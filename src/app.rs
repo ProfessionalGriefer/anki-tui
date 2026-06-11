@@ -3,13 +3,19 @@
 use anyhow::Result;
 use ratatui_image::picker::Picker;
 
-use crate::anki::AnkiConnect;
+use crate::anki::{AnkiConnect, DeckCounts};
 use crate::media::SideMedia;
 
 /// Which screen the user is currently looking at.
 pub enum Screen {
     DeckList,
     Review,
+}
+
+/// A deck plus its new/learn/review counts for the overview.
+pub struct DeckInfo {
+    pub name: String,
+    pub counts: DeckCounts,
 }
 
 /// The card currently under review, with media for both sides.
@@ -27,7 +33,7 @@ pub struct App {
     pub screen: Screen,
 
     // Deck list state.
-    pub decks: Vec<String>,
+    pub decks: Vec<DeckInfo>,
     pub deck_selected: usize,
     /// Case-insensitive substring filter for the deck list.
     pub search: String,
@@ -57,7 +63,7 @@ pub const GRADE_LABELS: [&str; 4] = ["Again", "Hard", "Good", "Easy"];
 impl App {
     pub fn new(picker: Picker) -> Result<Self> {
         let anki = AnkiConnect::new();
-        let decks = load_sorted_decks(&anki)?;
+        let decks = load_decks(&anki)?;
         Ok(Self {
             anki,
             picker,
@@ -80,15 +86,15 @@ impl App {
 
     // ----- Deck list -----
 
-    /// Deck names matching the current search filter, in display order.
-    pub fn filtered_decks(&self) -> Vec<&String> {
+    /// Decks matching the current search filter, in display order.
+    pub fn filtered_decks(&self) -> Vec<&DeckInfo> {
         if self.search.is_empty() {
             self.decks.iter().collect()
         } else {
             let query = self.search.to_lowercase();
             self.decks
                 .iter()
-                .filter(|d| d.to_lowercase().contains(&query))
+                .filter(|d| d.name.to_lowercase().contains(&query))
                 .collect()
         }
     }
@@ -143,7 +149,7 @@ impl App {
 
     /// Reload the deck list (e.g. when returning from review).
     pub fn refresh_decks(&mut self) {
-        match load_sorted_decks(&self.anki) {
+        match load_decks(&self.anki) {
             Ok(decks) => {
                 self.decks = decks;
                 self.clamp_selection();
@@ -154,7 +160,10 @@ impl App {
 
     /// Start reviewing the highlighted deck.
     pub fn enter_review(&mut self) {
-        let Some(deck) = self.filtered_decks().get(self.deck_selected).map(|d| (*d).clone())
+        let Some(deck) = self
+            .filtered_decks()
+            .get(self.deck_selected)
+            .map(|d| d.name.clone())
         else {
             return;
         };
@@ -327,9 +336,20 @@ impl App {
     }
 }
 
-/// Load deck names sorted case-insensitively for stable display.
-fn load_sorted_decks(anki: &AnkiConnect) -> Result<Vec<String>> {
-    let mut decks = anki.deck_names()?;
-    decks.sort_by_key(|d| d.to_lowercase());
+/// Load decks with their new/learn/review counts, sorted case-insensitively.
+fn load_decks(anki: &AnkiConnect) -> Result<Vec<DeckInfo>> {
+    let names_and_ids = anki.deck_names_and_ids()?;
+    let names: Vec<String> = names_and_ids.keys().cloned().collect();
+    // Counts are best-effort; fall back to zeros if the stats call fails.
+    let stats = anki.deck_stats(&names).unwrap_or_default();
+
+    let mut decks: Vec<DeckInfo> = names_and_ids
+        .into_iter()
+        .map(|(name, id)| DeckInfo {
+            name,
+            counts: stats.get(&id).copied().unwrap_or_default(),
+        })
+        .collect();
+    decks.sort_by_key(|d| d.name.to_lowercase());
     Ok(decks)
 }

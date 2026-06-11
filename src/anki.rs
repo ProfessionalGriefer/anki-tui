@@ -1,5 +1,7 @@
 //! Thin blocking client over the AnkiConnect HTTP API (version 6).
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -14,6 +16,14 @@ pub struct AnkiConnect {
 struct AnkiResponse {
     result: Value,
     error: Option<String>,
+}
+
+/// New / learning / review (due) counts for a deck, as shown in Anki's overview.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeckCounts {
+    pub new: u32,
+    pub learn: u32,
+    pub review: u32,
 }
 
 /// The current card shown in Anki's GUI reviewer (`guiCurrentCard`).
@@ -75,10 +85,36 @@ impl AnkiConnect {
         Ok(resp.result)
     }
 
-    /// All deck names.
-    pub fn deck_names(&self) -> Result<Vec<String>> {
-        let result = self.invoke("deckNames", Value::Null)?;
+    /// Full deck names mapped to their deck ids.
+    pub fn deck_names_and_ids(&self) -> Result<HashMap<String, i64>> {
+        let result = self.invoke("deckNamesAndIds", Value::Null)?;
         Ok(serde_json::from_value(result)?)
+    }
+
+    /// New / learning / review (due) counts for each given deck, keyed by deck id.
+    pub fn deck_stats(&self, decks: &[String]) -> Result<HashMap<i64, DeckCounts>> {
+        #[derive(Deserialize)]
+        struct Raw {
+            deck_id: i64,
+            new_count: u32,
+            learn_count: u32,
+            review_count: u32,
+        }
+        let result = self.invoke("getDeckStats", json!({ "decks": decks }))?;
+        let raw: HashMap<String, Raw> = serde_json::from_value(result)?;
+        Ok(raw
+            .into_values()
+            .map(|r| {
+                (
+                    r.deck_id,
+                    DeckCounts {
+                        new: r.new_count,
+                        learn: r.learn_count,
+                        review: r.review_count,
+                    },
+                )
+            })
+            .collect())
     }
 
     /// Start reviewing the given deck in Anki's GUI reviewer.
