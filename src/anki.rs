@@ -45,6 +45,13 @@ impl AnkiConnect {
 
     /// Perform a single AnkiConnect action and return its `result` value.
     fn invoke(&self, action: &str, params: Value) -> Result<Value> {
+        // AnkiConnect's schema requires `params` to be an object, so paramless
+        // actions must send `{}` rather than `null`.
+        let params = if params.is_null() {
+            json!({})
+        } else {
+            params
+        };
         let body = json!({
             "action": action,
             "version": 6,
