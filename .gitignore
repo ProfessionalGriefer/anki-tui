@@ -1,0 +1,16 @@
+/target
+/tests/fixtures/*.anki2
+/tests/fixtures/*.anki2-shm
+/tests/fixtures/*.anki2-wal
+sidecar/.venv/
+sidecar/wheels/
+sidecar/.pytest_cache/
+sidecar/__pycache__/
+sidecar/tests/__pycache__/
+
+
+# Added by cargo
+#
+# already existing elements were commented out
+
+#/target
