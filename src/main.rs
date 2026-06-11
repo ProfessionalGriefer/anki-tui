@@ -6,7 +6,7 @@ mod ui;
 use std::time::Duration;
 
 use anyhow::Result;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui_image::picker::Picker;
 
 use crate::app::{App, Screen};
@@ -31,9 +31,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         // Timeout keeps the UI responsive for image (re)encoding.
         if event::poll(Duration::from_millis(250))?
             && let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press {
-                    handle_key(app, key.code);
-                }
+            && key.kind == KeyEventKind::Press
+        {
+            handle_key(app, key);
+        }
 
         if app.should_quit {
             break;
@@ -42,19 +43,25 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     Ok(())
 }
 
-fn handle_key(app: &mut App, code: KeyCode) {
+fn handle_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match app.screen {
         // While searching, keystrokes edit the filter rather than triggering commands.
         Screen::DeckList if app.searching => match code {
             KeyCode::Esc => app.cancel_search(),
             KeyCode::Enter => app.confirm_search(),
             KeyCode::Backspace => app.backspace_search(),
+            KeyCode::Char('d') if ctrl => app.select_page_down(),
+            KeyCode::Char('u') if ctrl => app.select_page_up(),
             KeyCode::Down => app.select_next_deck(),
             KeyCode::Up => app.select_prev_deck(),
             KeyCode::Char(c) => app.push_search(c),
             _ => {}
         },
         Screen::DeckList => match code {
+            KeyCode::Char('d') if ctrl => app.select_page_down(),
+            KeyCode::Char('u') if ctrl => app.select_page_up(),
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Char('/') => app.start_search(),
             KeyCode::Char('j') | KeyCode::Down => app.select_next_deck(),
@@ -65,7 +72,7 @@ fn handle_key(app: &mut App, code: KeyCode) {
         },
         Screen::Review => match code {
             KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Char('d') => app.back_to_decks(),
+            KeyCode::Char('d') if !ctrl => app.back_to_decks(),
             KeyCode::Char(' ') => app.show_answer(),
             KeyCode::Char('r') => app.replay_audio(),
             KeyCode::Char('u') => app.undo(),

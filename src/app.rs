@@ -60,6 +60,9 @@ pub struct App {
 /// The four grade labels, indexed by ease - 1.
 pub const GRADE_LABELS: [&str; 4] = ["Again", "Hard", "Good", "Easy"];
 
+/// How many rows `Ctrl-d`/`Ctrl-u` jump in the deck list.
+const PAGE_JUMP: usize = 10;
+
 impl App {
     pub fn new(picker: Picker) -> Result<Self> {
         let anki = AnkiConnect::new();
@@ -108,6 +111,19 @@ impl App {
 
     pub fn select_prev_deck(&mut self) {
         self.deck_selected = self.deck_selected.saturating_sub(1);
+    }
+
+    /// Vim `Ctrl-d`: jump the selection down by half a page.
+    pub fn select_page_down(&mut self) {
+        let len = self.filtered_decks().len();
+        if len > 0 {
+            self.deck_selected = (self.deck_selected + PAGE_JUMP).min(len - 1);
+        }
+    }
+
+    /// Vim `Ctrl-u`: jump the selection up by half a page.
+    pub fn select_page_up(&mut self) {
+        self.deck_selected = self.deck_selected.saturating_sub(PAGE_JUMP);
     }
 
     /// Begin capturing keystrokes into the search filter.
