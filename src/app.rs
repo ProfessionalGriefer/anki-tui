@@ -42,6 +42,52 @@ pub struct ReviewCard {
     pub next_reviews: Vec<String>,
 }
 
+/// The kind of a revlog entry, used for coloring the history table.
+#[derive(Clone, Copy)]
+pub enum ReviewKind {
+    Learn,
+    Review,
+    Relearn,
+    Filtered,
+}
+
+impl ReviewKind {
+    pub fn from_code(code: i64) -> Self {
+        match code {
+            0 => ReviewKind::Learn,
+            2 => ReviewKind::Relearn,
+            3 => ReviewKind::Filtered,
+            _ => ReviewKind::Review,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ReviewKind::Learn => "Learn",
+            ReviewKind::Review => "Review",
+            ReviewKind::Relearn => "Relearn",
+            ReviewKind::Filtered => "Filtered",
+        }
+    }
+}
+
+/// One row of the review-history table in the card-info popup.
+pub struct ReviewRow {
+    pub date: String,
+    pub kind: ReviewKind,
+    pub rating: i64,
+    pub interval: String,
+    pub time: String,
+}
+
+/// Card-info popup contents: a list of label/value rows plus the review history,
+/// built on demand when the user presses `i`. FSRS-only stats (stability,
+/// difficulty, retrievability) are omitted because AnkiConnect doesn't expose them.
+pub struct CardStats {
+    pub rows: Vec<(String, String)>,
+    pub history: Vec<ReviewRow>,
+}
+
 pub struct App {
     pub anki: AnkiConnect,
     pub picker: Picker,
@@ -72,6 +118,10 @@ pub struct App {
     /// True while showing a restored (undone) card that is re-graded locally
     /// via `answerCards` rather than the GUI reviewer.
     pub undone: bool,
+    /// When `Some`, the card-info popup is open over the review screen.
+    pub stats: Option<CardStats>,
+    /// Vertical scroll offset within the card-info popup.
+    pub stats_scroll: u16,
 
     /// Transient status / error message shown in the footer.
     pub status: Option<String>,
@@ -106,6 +156,8 @@ impl App {
             deck_finished: false,
             prev_card: None,
             undone: false,
+            stats: None,
+            stats_scroll: 0,
             status: None,
         should_quit: false,
         })

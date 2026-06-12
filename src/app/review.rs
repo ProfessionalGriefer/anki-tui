@@ -1,6 +1,9 @@
 //! Review screen: card loading, revealing the answer, grading, and undo.
 
-use super::{App, GRADE_LABELS, ReviewCard};
+use anyhow::Result;
+use chrono::{Local, TimeZone};
+
+use super::{App, CardStats, GRADE_LABELS, ReviewCard, ReviewKind, ReviewRow};
 use crate::media::SideMedia;
 
 impl App {
@@ -155,5 +158,169 @@ impl App {
 
     pub fn scroll_up(&mut self) {
         self.scroll = self.scroll.saturating_sub(1);
+    }
+
+    /// Open the card-info popup for the current card, or close it if already open
+    /// (mirrors Anki's `i` shortcut). A no-op when no card is shown.
+    pub fn toggle_stats(&mut self) {
+        if self.stats.is_some() {
+            self.stats = None;
+            return;
+        }
+        let Some(card) = &self.card else { return };
+        match self.build_stats(card.card_id) {
+            Ok(stats) => {
+                self.stats = Some(stats);
+                self.stats_scroll = 0;
+            }
+            Err(e) => self.status = Some(e.to_string()),
+        }
+    }
+
+    pub fn stats_scroll_down(&mut self) {
+        self.stats_scroll = self.stats_scroll.saturating_add(1);
+    }
+
+    pub fn stats_scroll_up(&mut self) {
+        self.stats_scroll = self.stats_scroll.saturating_sub(1);
+    }
+
+    /// Gather scheduling metadata and review history for the given card and turn
+    /// it into the label/value rows and history table shown in the popup.
+    fn build_stats(&self, card_id: i64) -> Result<CardStats> {
+        let info = self
+            .anki
+            .card_info(card_id)?
+            .ok_or_else(|| anyhow::anyhow!("card not found"))?;
+        let mut reviews = self.anki.card_reviews(card_id)?;
+        reviews.sort_by_key(|r| r.id);
+
+        let mut rows: Vec<(String, String)> = Vec::new();
+        // The note id encodes the note's creation time (epoch ms).
+        rows.push(("Added".into(), fmt_date(info.note)));
+        if let Some(first) = reviews.first() {
+            rows.push(("First Review".into(), fmt_date(first.id)));
+        }
+        if let Some(last) = reviews.last() {
+            rows.push(("Latest Review".into(), fmt_date(last.id)));
+            // A review card's next due date is its last review plus the interval.
+            if info.queue == 2 && info.interval > 0 {
+                rows.push(("Due".into(), fmt_date_plus_days(last.id, info.interval)));
+            }
+        }
+        rows.push(("Interval".into(), fmt_days(info.interval)));
+        // Ease factor only applies to SM-2 scheduling; FSRS reports 0.
+        if info.factor > 0 {
+            rows.push(("Ease".into(), format!("{}%", info.factor / 10)));
+        }
+        rows.push(("Reviews".into(), info.reps.to_string()));
+        rows.push(("Lapses".into(), info.lapses.to_string()));
+        if !reviews.is_empty() {
+            let total_ms: i64 = reviews.iter().map(|r| r.time).sum();
+            let avg_ms = total_ms / reviews.len() as i64;
+            rows.push(("Average Time".into(), fmt_duration_long(avg_ms)));
+            rows.push(("Total Time".into(), fmt_duration_long(total_ms)));
+        }
+        rows.push(("Note Type".into(), info.model_name));
+        rows.push(("Deck".into(), info.deck_name));
+        rows.push(("Card ID".into(), card_id.to_string()));
+        rows.push(("Note ID".into(), info.note.to_string()));
+
+        // Newest review first, as Anki shows it.
+        let history = reviews
+            .iter()
+            .rev()
+            .map(|r| ReviewRow {
+                date: fmt_datetime(r.id),
+                kind: ReviewKind::from_code(r.kind),
+                rating: r.ease,
+                interval: fmt_revlog_ivl(r.ivl),
+                time: fmt_duration_short(r.time),
+            })
+            .collect();
+
+        Ok(CardStats { rows, history })
+    }
+}
+
+/// Format an epoch-ms timestamp as a local `YYYY-MM-DD` date.
+fn fmt_date(ms: i64) -> String {
+    match Local.timestamp_millis_opt(ms).single() {
+        Some(dt) => dt.format("%Y-%m-%d").to_string(),
+        None => "?".into(),
+    }
+}
+
+/// Format an epoch-ms timestamp as a local `YYYY-MM-DD @ HH:MM`.
+fn fmt_datetime(ms: i64) -> String {
+    match Local.timestamp_millis_opt(ms).single() {
+        Some(dt) => dt.format("%Y-%m-%d @ %H:%M").to_string(),
+        None => "?".into(),
+    }
+}
+
+/// Format `ms` plus a whole number of days, as a local date.
+fn fmt_date_plus_days(ms: i64, days: i64) -> String {
+    match Local.timestamp_millis_opt(ms).single() {
+        Some(dt) => (dt + chrono::Duration::days(days))
+            .format("%Y-%m-%d")
+            .to_string(),
+        None => "?".into(),
+    }
+}
+
+/// Human-readable interval given a count of days (the card's current interval).
+fn fmt_days(days: i64) -> String {
+    if days <= 0 {
+        "new".into()
+    } else if days == 1 {
+        "1 day".into()
+    } else if days < 30 {
+        format!("{days} days")
+    } else if days < 365 {
+        format!("{:.1} months", days as f64 / 30.0)
+    } else {
+        format!("{:.1} years", days as f64 / 365.0)
+    }
+}
+
+/// Human-readable interval from a revlog `ivl` (negative = seconds, positive = days).
+fn fmt_revlog_ivl(ivl: i64) -> String {
+    if ivl >= 0 {
+        return fmt_days(ivl);
+    }
+    let secs = -ivl;
+    if secs < 60 {
+        format!("{secs} second{}", plural(secs))
+    } else if secs < 3600 {
+        let mins = secs / 60;
+        format!("{mins} minute{}", plural(mins))
+    } else {
+        format!("{:.1} hours", secs as f64 / 3600.0)
+    }
+}
+
+/// `"s"` unless `n` is exactly 1, for simple pluralization.
+fn plural(n: i64) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+/// Compact duration for the history table's time column (e.g. `7.25s`, `1.8m`).
+fn fmt_duration_short(ms: i64) -> String {
+    let secs = ms as f64 / 1000.0;
+    if secs < 60.0 {
+        format!("{secs:.2}s")
+    } else {
+        format!("{:.1}m", secs / 60.0)
+    }
+}
+
+/// Verbose duration for the average/total time rows (e.g. `19.6 seconds`).
+fn fmt_duration_long(ms: i64) -> String {
+    let secs = ms as f64 / 1000.0;
+    if secs < 60.0 {
+        format!("{secs:.1} seconds")
+    } else {
+        format!("{:.2} minutes", secs / 60.0)
     }
 }

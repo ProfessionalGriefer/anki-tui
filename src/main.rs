@@ -82,10 +82,19 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 _ => {}
             }
         }
+        // The card-info popup is modal: it captures keys until dismissed.
+        Screen::Review if app.stats.is_some() => match code {
+            KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Char('i') | KeyCode::Esc => app.toggle_stats(),
+            KeyCode::Char('j') | KeyCode::Down => app.stats_scroll_down(),
+            KeyCode::Char('k') | KeyCode::Up => app.stats_scroll_up(),
+            _ => {}
+        },
         Screen::Review => match code {
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Char('y') => app.sync(),
             KeyCode::Char('d') if !ctrl => app.back_to_decks(),
+            KeyCode::Char('i') => app.toggle_stats(),
             KeyCode::Char(' ') | KeyCode::Enter => app.space(),
             KeyCode::Char('r') => app.replay_audio(),
             KeyCode::Char('u') => app.undo(),

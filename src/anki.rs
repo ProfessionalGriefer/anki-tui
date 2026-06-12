@@ -41,6 +41,43 @@ pub struct CurrentCard {
     pub next_reviews: Vec<String>,
 }
 
+/// Scheduling metadata for a single card (subset of `cardsInfo`).
+#[derive(Debug, Deserialize)]
+pub struct CardInfo {
+    #[serde(rename = "deckName")]
+    pub deck_name: String,
+    #[serde(rename = "modelName")]
+    pub model_name: String,
+    /// Note id, which also encodes the note's creation time (epoch ms).
+    pub note: i64,
+    /// SM-2 ease factor in permille (2500 = 250%); 0 under FSRS.
+    pub factor: i64,
+    /// Current interval in days.
+    pub interval: i64,
+    /// Total reviews.
+    pub reps: i64,
+    /// Times the card lapsed (forgotten after graduating).
+    pub lapses: i64,
+    /// Scheduling queue (2 = review).
+    pub queue: i64,
+}
+
+/// One revlog entry for a card (`getReviewsOfCards`).
+#[derive(Debug, Deserialize)]
+pub struct ReviewEntry {
+    /// Review time, epoch ms.
+    pub id: i64,
+    /// Button pressed: 1 (Again) .. 4 (Easy).
+    pub ease: i64,
+    /// New interval: negative = seconds, positive = days.
+    pub ivl: i64,
+    /// Time taken, ms.
+    pub time: i64,
+    /// 0 = learn, 1 = review, 2 = relearn, 3 = filtered/cram.
+    #[serde(rename = "type")]
+    pub kind: i64,
+}
+
 impl AnkiConnect {
     pub fn new() -> Self {
         let url = std::env::var("ANKI_CONNECT_URL")
@@ -173,6 +210,22 @@ impl AnkiConnect {
             .and_then(|a| a.first())
             .and_then(|v| v.as_bool())
             .unwrap_or(false))
+    }
+
+    /// Scheduling metadata for a single card, or `None` if it doesn't exist.
+    pub fn card_info(&self, card_id: i64) -> Result<Option<CardInfo>> {
+        let result = self.invoke("cardsInfo", json!({ "cards": [card_id] }))?;
+        let mut infos: Vec<CardInfo> = serde_json::from_value(result)?;
+        Ok(infos.drain(..).next())
+    }
+
+    /// Full review history for a card, in the order AnkiConnect returns it.
+    /// Note: this action only works with an integer card id, not a string.
+    pub fn card_reviews(&self, card_id: i64) -> Result<Vec<ReviewEntry>> {
+        let result = self.invoke("getReviewsOfCards", json!({ "cards": [card_id] }))?;
+        // Shape: `{ "<card id>": [ {entry}, ... ] }`.
+        let mut map: HashMap<String, Vec<ReviewEntry>> = serde_json::from_value(result)?;
+        Ok(map.drain().next().map(|(_, v)| v).unwrap_or_default())
     }
 
     /// Synchronize the local collection with AnkiWeb (uses Anki's saved login).

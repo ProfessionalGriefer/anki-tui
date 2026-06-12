@@ -4,11 +4,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui_image::StatefulImage;
 
 use crate::anki::DeckCounts;
-use crate::app::{App, GRADE_LABELS, Screen};
+use crate::app::{App, CardStats, GRADE_LABELS, ReviewKind, Screen};
 use crate::media::{Block as ContentBlock, SideMedia, render_html};
 
 /// Width reserved by the list's highlight gutter (selection shown via bg color,
@@ -20,7 +20,25 @@ const COUNT_WIDTH: usize = 5;
 pub fn render(frame: &mut Frame, app: &mut App) {
     match app.screen {
         Screen::DeckList => render_deck_list(frame, app),
-        Screen::Review => render_review(frame, app),
+        Screen::Review => {
+            render_review(frame, app);
+            // Overlay the card-info popup once `render_review`'s mutable borrow
+            // of `app` has ended, so we can read `app.stats` here.
+            if let Some(stats) = &app.stats {
+                let area = frame.area();
+                render_stats_popup(frame, area, stats, app.stats_scroll);
+                // Replace the footer hint with the popup's own controls.
+                let footer_rect = Rect {
+                    x: area.x,
+                    y: area.y + area.height.saturating_sub(1),
+                    width: area.width,
+                    height: 1,
+                };
+                let hint = footer(" i/Esc: close   j/k: scroll   q: quit ", app.status.as_deref());
+                frame.render_widget(Clear, footer_rect);
+                frame.render_widget(hint, footer_rect);
+            }
+        }
     }
 }
 
@@ -195,7 +213,7 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     let hint_text = if app.answer_shown {
         grade_hint(&card.buttons, &card.next_reviews)
     } else {
-        " space: show answer   j/k: scroll   r: replay   u: undo   y: sync   d: decks   q: quit "
+        " space: show answer   j/k: scroll   r: replay   i: info   u: undo   d: decks   q: quit "
             .to_string()
     };
     let hint = footer(&hint_text, app.status.as_deref());
@@ -282,9 +300,108 @@ fn grade_hint(buttons: &[i64], next_reviews: &[String]) -> String {
         }
     }
     format!(
-        " {}   space: good   r: replay   u: undo   d: decks   q: quit ",
+        " {}   space: good   r: replay   i: info   u: undo   d: decks   q: quit ",
         parts.join("  ")
     )
+}
+
+/// A centered rectangle covering `pct_x`/`pct_y` percent of `area`.
+fn centered_rect(pct_x: u16, pct_y: u16, area: Rect) -> Rect {
+    let vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - pct_y) / 2),
+            Constraint::Percentage(pct_y),
+            Constraint::Percentage((100 - pct_y) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - pct_x) / 2),
+            Constraint::Percentage(pct_x),
+            Constraint::Percentage((100 - pct_x) / 2),
+        ])
+        .split(vert[1])[1]
+}
+
+/// Render the card-info popup (Anki's `i` panel): label/value rows followed by
+/// the review-history table, vertically scrollable.
+fn render_stats_popup(frame: &mut Frame, area: Rect, stats: &CardStats, scroll: u16) {
+    let area = centered_rect(80, 80, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Card Info ")
+        .title_style(Style::default().add_modifier(Modifier::BOLD));
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+
+    // Width of the label column, sized to the longest label.
+    let label_w = stats
+        .rows
+        .iter()
+        .map(|(l, _)| l.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let mut lines: Vec<Line> = stats
+        .rows
+        .iter()
+        .map(|(label, value)| {
+            Line::from(vec![
+                Span::styled(
+                    format!("{label:<label_w$}  "),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(value.clone()),
+            ])
+        })
+        .collect();
+
+    if !stats.history.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(
+            history_cells("Date", "Type", "Rating", "Interval", "Time"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        for row in &stats.history {
+            lines.push(Line::from(vec![
+                Span::raw(format!("{:<18}", row.date)),
+                Span::styled(format!("{:<9}", row.kind.label()), kind_style(row.kind)),
+                Span::styled(
+                    format!("{:<8}", row.rating),
+                    // Again (1) is the only rating Anki colors (red).
+                    if row.rating == 1 {
+                        Style::default().fg(Color::Red)
+                    } else {
+                        Style::default()
+                    },
+                ),
+                Span::raw(format!("{:<13}", row.interval)),
+                Span::raw(row.time.clone()),
+            ]));
+        }
+    }
+
+    let para = Paragraph::new(lines).scroll((scroll, 0));
+    frame.render_widget(para, inner);
+}
+
+/// Lay the history table's five columns out at fixed widths.
+fn history_cells(date: &str, kind: &str, rating: &str, interval: &str, time: &str) -> String {
+    format!("{date:<18}{kind:<9}{rating:<8}{interval:<13}{time}")
+}
+
+/// The color Anki uses for each review type in the history table.
+fn kind_style(kind: ReviewKind) -> Style {
+    let color = match kind {
+        ReviewKind::Learn => Color::Blue,
+        ReviewKind::Review => Color::Green,
+        ReviewKind::Relearn => Color::Red,
+        ReviewKind::Filtered => Color::Cyan,
+    };
+    Style::default().fg(color)
 }
 
 /// A one-line footer; shows a status/error message when present, else the hint.
