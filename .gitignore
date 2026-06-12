@@ -7,7 +7,7 @@ sidecar/wheels/
 sidecar/.pytest_cache/
 sidecar/__pycache__/
 sidecar/tests/__pycache__/
-
+*.gz
 
 # Added by cargo
 #
