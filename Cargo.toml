@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 base64 = "0.22.1"
+directories = "6.0.0"
 html2text = "0.17.1"
 image = "0.25.10"
 ratatui = "0.30.1"
