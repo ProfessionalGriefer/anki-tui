@@ -1,6 +1,6 @@
 [package]
 name = "anki-tui"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 
 [dependencies]
@@ -12,8 +12,8 @@ html2text = "0.17.1"
 image = "0.25.10"
 ratatui = "0.30.1"
 ratatui-image = { version = "11.0.4", default-features = false, features = [
-    "image-defaults",
-    "crossterm",
+  "image-defaults",
+  "crossterm",
 ] }
 reqwest = { version = "0.13.4", features = ["blocking", "json"] }
 serde = { version = "1.0.228", features = ["derive"] }
