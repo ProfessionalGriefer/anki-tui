@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::Result;
-use html2text::render::RichAnnotation;
-use ratatui::style::{Modifier, Style};
+use html2text::render::{RichAnnotation, TaggedLineElement};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
@@ -61,28 +61,23 @@ impl SideMedia {
     /// handles entities, lists, tables, and drops `<style>`/`<script>` blocks.
     pub fn to_text(&self, width: u16) -> Text<'static> {
         let width = width.max(10) as usize;
-        let Ok(lines) = html2text::config::rich().lines_from_read(self.html.as_bytes(), width)
-        else {
-            return Text::raw(self.html.clone());
-        };
-
-        let rendered: Vec<Line> = lines
-            .into_iter()
-            .map(|tline| {
-                let spans: Vec<Span> = tline
-                    .into_iter()
-                    .filter_map(|el| match el {
-                        html2text::render::TaggedLineElement::Str(ts) => {
-                            Some(Span::styled(ts.s, annotations_to_style(&ts.tag)))
-                        }
-                        // Fragment anchors carry no visible text.
-                        _ => None,
-                    })
-                    .collect();
-                Line::from(spans)
-            })
-            .collect();
-        Text::from(rendered)
+        // html2text drops `<hr>` entirely, so split on it ourselves and draw a
+        // rule between the segments (this is Anki's question/answer separator).
+        let mut out: Vec<Line> = Vec::new();
+        for segment in split_on_hr(&self.html) {
+            let seg_lines = render_segment(&segment, width);
+            if seg_lines.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push(Line::from(Span::styled(
+                    "─".repeat(width),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            out.extend(seg_lines);
+        }
+        Text::from(out)
     }
 
     /// Play every audio clip on this side (used on reveal and for the `r` key).
@@ -91,6 +86,58 @@ impl SideMedia {
             play_file(path);
         }
     }
+}
+
+/// Render one HTML fragment (no `<hr>`) to styled lines via html2text's rich
+/// renderer. On failure, fall back to the raw text as a single line.
+fn render_segment(html: &str, width: usize) -> Vec<Line<'static>> {
+    let Ok(lines) = html2text::config::rich().lines_from_read(html.as_bytes(), width) else {
+        return vec![Line::from(html.to_string())];
+    };
+    lines
+        .into_iter()
+        .map(|tline| {
+            let spans: Vec<Span> = tline
+                .into_iter()
+                .filter_map(|el| match el {
+                    TaggedLineElement::Str(ts) => {
+                        Some(Span::styled(ts.s, annotations_to_style(&ts.tag)))
+                    }
+                    // Fragment anchors carry no visible text.
+                    _ => None,
+                })
+                .collect();
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// Split HTML on `<hr …>` tags, which html2text discards. Returns the text
+/// between (and around) the rules so the caller can draw a separator.
+fn split_on_hr(html: &str) -> Vec<String> {
+    let lower = html.to_ascii_lowercase();
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < html.len() {
+        // Match `<hr` only at a tag boundary (next char ends the name).
+        if lower[i..].starts_with("<hr") {
+            let boundary = lower[i + 3..]
+                .chars()
+                .next()
+                .is_none_or(|c| c == '>' || c == '/' || c.is_whitespace());
+            if boundary && let Some(end) = html[i..].find('>') {
+                out.push(html[start..i].to_string());
+                i += end + 1;
+                start = i;
+                continue;
+            }
+        }
+        let ch = html[i..].chars().next().unwrap();
+        i += ch.len_utf8();
+    }
+    out.push(html[start..].to_string());
+    out
 }
 
 /// Map html2text's rich annotations to a ratatui style. Annotations nest
@@ -282,6 +329,23 @@ mod tests {
         assert!(text.contains("world"));
         assert!(!text.contains("color"));
         assert!(!text.contains("<"));
+    }
+
+    #[test]
+    fn dbg_hr() {
+        let html = "Acronym: <b>OSCI</b><hr id=answer/>Online Services Computer Interface";
+        for line in html2text::config::rich()
+            .lines_from_read(html.as_bytes(), 60)
+            .unwrap()
+        {
+            let mut s = String::new();
+            for el in line {
+                if let html2text::render::TaggedLineElement::Str(ts) = el {
+                    s.push_str(&ts.s);
+                }
+            }
+            eprintln!("LINE {s:?}");
+        }
     }
 
     #[test]
