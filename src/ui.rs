@@ -9,6 +9,7 @@ use ratatui_image::StatefulImage;
 
 use crate::anki::DeckCounts;
 use crate::app::{App, GRADE_LABELS, Screen};
+use crate::media::{Block as ContentBlock, SideMedia, render_html};
 
 /// Width reserved by the list's highlight gutter (selection shown via bg color,
 /// so the fold arrows aren't shifted).
@@ -183,35 +184,12 @@ fn render_review(frame: &mut Frame, app: &mut App) {
         &mut card.question
     };
 
-    // Split body into a text area and (if there are images) an image area.
-    let body_chunks = if side.images.is_empty() {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1)])
-            .split(chunks[1])
+    let title = if app.answer_shown {
+        " Answer "
     } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(chunks[1])
+        " Question "
     };
-
-    let text_block = Block::default()
-        .borders(Borders::ALL)
-        .title(if app.answer_shown { " Answer " } else { " Question " });
-    // Render the HTML to text wrapped to the block's inner width.
-    let text_width = body_chunks[0].width.saturating_sub(2);
-    let text = side.to_text(text_width);
-    let paragraph = Paragraph::new(text)
-        .block(text_block)
-        .wrap(Wrap { trim: false })
-        .scroll((app.scroll, 0));
-    frame.render_widget(paragraph, body_chunks[0]);
-
-    // Render images side by side in the image area.
-    if body_chunks.len() > 1 && !side.images.is_empty() {
-        render_images(frame, body_chunks[1], &mut side.images);
-    }
+    render_card_body(frame, chunks[1], side, app.scroll, title);
 
     // Footer: grading hints once the answer is shown.
     let hint_text = if app.answer_shown {
@@ -224,24 +202,69 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     frame.render_widget(hint, chunks[2]);
 }
 
-/// Lay images out in equal-width columns and render each one.
-fn render_images(
-    frame: &mut Frame,
-    area: Rect,
-    images: &mut [ratatui_image::protocol::StatefulProtocol],
-) {
-    let n = images.len() as u32;
-    let constraints: Vec<Constraint> = (0..images.len())
-        .map(|_| Constraint::Ratio(1, n))
-        .collect();
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(constraints)
-        .split(area);
-    for (img, col) in images.iter_mut().zip(cols.iter()) {
-        let widget = StatefulImage::new();
-        frame.render_stateful_widget(widget, *col, img);
+/// Render a card side: text and image blocks stacked vertically in document
+/// order inside one bordered area, scrolled by `scroll` rows. Each text block
+/// takes exactly the rows it needs and each image is drawn at its natural cell
+/// size, so images appear inline with the surrounding text.
+fn render_card_body(frame: &mut Frame, area: Rect, side: &mut SideMedia, scroll: u16, title: &str) {
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let view_h = inner.height as i32;
+    // `y` is each block's top row relative to the top of `inner`, shifted up by
+    // the scroll offset. A 1-row gap separates consecutive blocks.
+    let mut y: i32 = -(scroll as i32);
+    // Take the blocks out so we can borrow `side.images` mutably while iterating.
+    let blocks = std::mem::take(&mut side.blocks);
+    for (idx, blk) in blocks.iter().enumerate() {
+        if idx > 0 {
+            y += 1;
+        }
+        match blk {
+            ContentBlock::Text(html) => {
+                let text = render_html(html, inner.width);
+                let h = text.lines.len() as i32;
+                // Visible portion of this block within the viewport.
+                if y + h > 0 && y < view_h {
+                    let skip = (-y).max(0); // rows of this block scrolled off the top
+                    let screen_y = inner.y + y.max(0) as u16;
+                    let draw_h = (h - skip).min(view_h - y.max(0)).max(0) as u16;
+                    if draw_h > 0 {
+                        let rect = Rect {
+                            x: inner.x,
+                            y: screen_y,
+                            width: inner.width,
+                            height: draw_h,
+                        };
+                        let paragraph = Paragraph::new(text)
+                            .wrap(Wrap { trim: false })
+                            .scroll((skip as u16, 0));
+                        frame.render_widget(paragraph, rect);
+                    }
+                }
+                y += h;
+            }
+            ContentBlock::Image(i) => {
+                let img = &mut side.images[*i];
+                let h = img.rows as i32;
+                // Only draw when the top is on-screen; ratatui-image can't clip a
+                // partially scrolled image cleanly, so we keep it all-or-nothing.
+                if y >= 0 && y < view_h {
+                    let avail_h = (view_h - y) as u16;
+                    let rect = Rect {
+                        x: inner.x,
+                        y: inner.y + y as u16,
+                        width: img.cols.min(inner.width),
+                        height: img.rows.min(avail_h),
+                    };
+                    frame.render_stateful_widget(StatefulImage::new(), rect, &mut img.protocol);
+                }
+                y += h;
+            }
+        }
     }
+    side.blocks = blocks;
 }
 
 /// Build the grading footer from the card's available buttons/intervals.

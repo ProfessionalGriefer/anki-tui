@@ -5,42 +5,55 @@ use std::process::Command;
 
 use anyhow::Result;
 use html2text::render::{RichAnnotation, TaggedLineElement};
+use image::GenericImageView;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
+use ratatui_image::FontSize;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::anki::AnkiConnect;
 
+/// One renderable piece of a card side, kept in the order it appears in the
+/// card HTML so images sit inline with the text rather than all at the bottom.
+pub enum Block {
+    /// HTML fragment (media tokens removed), rendered to styled text on demand.
+    Text(String),
+    /// Index into [`SideMedia::images`].
+    Image(usize),
+}
+
+/// A decoded image plus its natural size in terminal cells, so it can be drawn
+/// near its original dimensions instead of being stretched to fill a pane.
+pub struct CardImage {
+    /// Terminal-ready protocol (re-encoded on resize).
+    pub protocol: StatefulProtocol,
+    pub cols: u16,
+    pub rows: u16,
+}
+
 /// Everything renderable/playable for one side of a card.
 pub struct SideMedia {
-    /// Card HTML with media tokens removed, rendered to text on demand.
-    html: String,
-    /// Decoded, terminal-ready image protocols (re-encoded on resize).
-    pub images: Vec<StatefulProtocol>,
+    /// Text and image blocks in the order they appear in the card HTML.
+    pub blocks: Vec<Block>,
+    /// Decoded images referenced by [`Block::Image`].
+    pub images: Vec<CardImage>,
     /// Paths to audio files written to a temp dir, ready for the player.
     pub audio: Vec<PathBuf>,
 }
 
 impl SideMedia {
     /// Build the media for one HTML fragment, fetching referenced files from Anki.
+    /// The HTML is split at `<img>` tags so each image keeps its position in the
+    /// text flow; runs of text between images become [`Block::Text`] entries.
     pub fn build(html: &str, anki: &AnkiConnect, picker: &Picker) -> Self {
-        let image_files = extract_images(html);
-        let audio_files = extract_audio(html);
-        // Drop media tokens so html2text doesn't emit `[sound:…]` / image alt text.
-        let cleaned = strip_media_tokens(html);
-
+        let font = picker.font_size();
+        let mut blocks = Vec::new();
         let mut images = Vec::new();
-        for name in image_files {
-            if let Ok(Some(bytes)) = anki.retrieve_media_file(&name)
-                && let Ok(img) = image::load_from_memory(&bytes)
-            {
-                images.push(picker.new_resize_protocol(img));
-            }
-        }
 
+        // Audio is collected up front and played as a group, so order doesn't matter.
         let mut audio = Vec::new();
-        for name in audio_files {
+        for name in extract_audio(html) {
             if let Ok(Some(bytes)) = anki.retrieve_media_file(&name)
                 && let Ok(path) = write_temp(&name, &bytes)
             {
@@ -48,36 +61,44 @@ impl SideMedia {
             }
         }
 
+        let lower = html.to_ascii_lowercase();
+        let mut i = 0;
+        let mut text_start = 0;
+        while i < html.len() {
+            if lower[i..].starts_with("<img")
+                && let Some(end_rel) = html[i..].find('>')
+            {
+                let tag_end = i + end_rel + 1;
+                // Flush the text accumulated before this image.
+                push_text_block(&mut blocks, &html[text_start..i]);
+                // Fetch and decode the image; on any failure we just skip it.
+                let tag = &html[i..tag_end];
+                if let Some(src) = attr_value(tag, "src")
+                    && let Ok(Some(bytes)) = anki.retrieve_media_file(&src)
+                    && let Ok(img) = image::load_from_memory(&bytes)
+                {
+                    let (cols, rows) = natural_cells(&img, font);
+                    blocks.push(Block::Image(images.len()));
+                    images.push(CardImage {
+                        protocol: picker.new_resize_protocol(img),
+                        cols,
+                        rows,
+                    });
+                }
+                i = tag_end;
+                text_start = i;
+                continue;
+            }
+            let ch = html[i..].chars().next().unwrap();
+            i += ch.len_utf8();
+        }
+        push_text_block(&mut blocks, &html[text_start..]);
+
         SideMedia {
-            html: cleaned,
+            blocks,
             images,
             audio,
         }
-    }
-
-    /// Render the card text to styled terminal text, wrapped to `width` columns.
-    /// Uses html2text's rich renderer so inline markup (`<b>`, `<em>`, `<code>`,
-    /// …) becomes ratatui styling rather than literal `**markers**`; it also
-    /// handles entities, lists, tables, and drops `<style>`/`<script>` blocks.
-    pub fn to_text(&self, width: u16) -> Text<'static> {
-        let width = width.max(10) as usize;
-        // html2text drops `<hr>` entirely, so split on it ourselves and draw a
-        // rule between the segments (this is Anki's question/answer separator).
-        let mut out: Vec<Line> = Vec::new();
-        for segment in split_on_hr(&self.html) {
-            let seg_lines = render_segment(&segment, width);
-            if seg_lines.is_empty() {
-                continue;
-            }
-            if !out.is_empty() {
-                out.push(Line::from(Span::styled(
-                    "─".repeat(width),
-                    Style::default().fg(Color::DarkGray),
-                )));
-            }
-            out.extend(seg_lines);
-        }
-        Text::from(out)
     }
 
     /// Play every audio clip on this side (used on reveal and for the `r` key).
@@ -86,6 +107,50 @@ impl SideMedia {
             play_file(path);
         }
     }
+}
+
+/// Strip media tokens from an HTML fragment and, if anything renderable is left,
+/// append it as a [`Block::Text`].
+fn push_text_block(blocks: &mut Vec<Block>, html: &str) {
+    let cleaned = strip_media_tokens(html);
+    if !cleaned.trim().is_empty() {
+        blocks.push(Block::Text(cleaned));
+    }
+}
+
+/// An image's natural size in terminal cells, given the font's cell pixel size.
+fn natural_cells(img: &image::DynamicImage, font: FontSize) -> (u16, u16) {
+    let (w, h) = img.dimensions();
+    let fw = font.width.max(1) as u32;
+    let fh = font.height.max(1) as u32;
+    let cols = w.div_ceil(fw).clamp(1, u16::MAX as u32) as u16;
+    let rows = h.div_ceil(fh).clamp(1, u16::MAX as u32) as u16;
+    (cols, rows)
+}
+
+/// Render an HTML fragment to styled terminal text, wrapped to `width` columns.
+/// Uses html2text's rich renderer so inline markup (`<b>`, `<em>`, `<code>`, …)
+/// becomes ratatui styling rather than literal `**markers**`; it also handles
+/// entities, lists, tables, and drops `<style>`/`<script>` blocks.
+pub fn render_html(html: &str, width: u16) -> Text<'static> {
+    let width = width.max(10) as usize;
+    // html2text drops `<hr>` entirely, so split on it ourselves and draw a
+    // rule between the segments (this is Anki's question/answer separator).
+    let mut out: Vec<Line> = Vec::new();
+    for segment in split_on_hr(html) {
+        let seg_lines = render_segment(&segment, width);
+        if seg_lines.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(Line::from(Span::styled(
+                "─".repeat(width),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        out.extend(seg_lines);
+    }
+    Text::from(out)
 }
 
 /// Render one HTML fragment (no `<hr>`) to styled lines via html2text's rich
@@ -157,27 +222,6 @@ fn annotations_to_style(tags: &[RichAnnotation]) -> Style {
         };
     }
     style
-}
-
-/// Pull `src="..."` filenames out of `<img>` tags.
-fn extract_images(html: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let lower = html.to_ascii_lowercase();
-    let mut search_from = 0;
-    while let Some(rel) = lower[search_from..].find("<img") {
-        let tag_start = search_from + rel;
-        // Find the end of this tag.
-        let tag_end = lower[tag_start..]
-            .find('>')
-            .map(|e| tag_start + e)
-            .unwrap_or(html.len());
-        let tag = &html[tag_start..tag_end];
-        if let Some(src) = attr_value(tag, "src") {
-            out.push(src);
-        }
-        search_from = tag_end.max(tag_start + 1);
-    }
-    out
 }
 
 /// Pull filenames out of `[sound:filename]` tokens.
@@ -287,12 +331,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extracts_image_filenames() {
-        let html = r#"<div>Front <img src="cat.jpg"> and <img src='dog.png' alt="d"></div>"#;
-        assert_eq!(extract_images(html), vec!["cat.jpg", "dog.png"]);
-    }
-
-    #[test]
     fn extracts_sound_filenames() {
         let html = "Word [sound:hello.mp3] more [sound:bye.ogg]";
         assert_eq!(extract_audio(html), vec!["hello.mp3", "bye.ogg"]);
@@ -310,16 +348,10 @@ mod tests {
 
     #[test]
     fn to_text_renders_html_and_drops_style() {
-        let side = SideMedia {
-            html: strip_media_tokens(
-                "<style>.card { color: red; }</style><p>Hello&nbsp;world</p>",
-            ),
-            images: Vec::new(),
-            audio: Vec::new(),
-        };
+        let html =
+            strip_media_tokens("<style>.card { color: red; }</style><p>Hello&nbsp;world</p>");
         // Flatten the styled lines back to a string to assert on content.
-        let text: String = side
-            .to_text(40)
+        let text: String = render_html(&html, 40)
             .lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -350,12 +382,7 @@ mod tests {
 
     #[test]
     fn to_text_renders_bold_as_modifier() {
-        let side = SideMedia {
-            html: "Acronym: <b>VVT</b>".to_string(),
-            images: Vec::new(),
-            audio: Vec::new(),
-        };
-        let text = side.to_text(40);
+        let text = render_html("Acronym: <b>VVT</b>", 40);
         // The "VVT" span must carry the BOLD modifier, and no literal `**`
         // markers should leak into the rendered text.
         let vvt = text

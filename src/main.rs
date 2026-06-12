@@ -86,7 +86,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Char('y') => app.sync(),
             KeyCode::Char('d') if !ctrl => app.back_to_decks(),
-            KeyCode::Char(' ') => app.space(),
+            KeyCode::Char(' ') | KeyCode::Enter => app.space(),
             KeyCode::Char('r') => app.replay_audio(),
             KeyCode::Char('u') => app.undo(),
             KeyCode::Char('j') | KeyCode::Down => app.scroll_down(),
