@@ -125,7 +125,16 @@ impl AnkiConnect {
 
     /// The card currently displayed by the reviewer, or `None` when the deck is done.
     pub fn gui_current_card(&self) -> Result<Option<CurrentCard>> {
-        let result = self.invoke("guiCurrentCard", Value::Null)?;
+        let result = match self.invoke("guiCurrentCard", Value::Null) {
+            Ok(result) => result,
+            // When the last card is graded Anki leaves the reviewer (showing its
+            // own congrats screen), so this action errors instead of returning
+            // null. Treat that as "no card left" rather than a failure.
+            Err(e) if e.to_string().contains("Gui review is not currently active") => {
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
         if result.is_null() {
             return Ok(None);
         }
