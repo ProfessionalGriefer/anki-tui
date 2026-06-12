@@ -71,6 +71,7 @@ These apply globally unless noted.
 
 | Key           | Action                                                 |
 | ------------- | ------------------------------------------------------ |
+| `?`           | Show the keybinding help popup                         |
 | `j`           | Move down (next deck in deck view / scroll card down)  |
 | `k`           | Move up (previous deck in deck view / scroll card up)  |
 | `l` / `Enter` | Open the selected deck and start reviewing (deck view) |

@@ -46,6 +46,21 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
 fn handle_key(app: &mut App, key: KeyEvent) {
     let code = key.code;
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+    // Help is global and modal, including while search or card info is open.
+    if app.help_open {
+        match code {
+            KeyCode::Char('?') | KeyCode::Esc => app.toggle_help(),
+            KeyCode::Char('q') => app.should_quit = true,
+            _ => {}
+        }
+        return;
+    }
+    if matches!(code, KeyCode::Char('?')) {
+        app.toggle_help();
+        return;
+    }
+
     match app.screen {
         // While searching, keystrokes edit the filter rather than triggering commands.
         Screen::DeckList if app.searching => match code {

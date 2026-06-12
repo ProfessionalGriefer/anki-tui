@@ -34,11 +34,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     width: area.width,
                     height: 1,
                 };
-                let hint = footer(" i/Esc: close   j/k: scroll   q: quit ", app.status.as_deref());
+                let hint = footer("", app.status.as_deref());
                 frame.render_widget(Clear, footer_rect);
                 frame.render_widget(hint, footer_rect);
             }
         }
+    }
+
+    if app.help_open {
+        render_help_popup(frame, frame.area());
     }
 }
 
@@ -101,24 +105,16 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
     }
     frame.render_stateful_widget(list, chunks[0], &mut state);
 
-    // Footer: live search prompt while typing, else key hints.
+    // Footer: live search prompt while typing, otherwise only status messages.
     if app.searching {
         let search_line = Line::from(vec![
             Span::styled("/", Style::default().fg(Color::Yellow)),
             Span::raw(app.search.as_str()),
             Span::styled("█", Style::default().fg(Color::Yellow)),
-            Span::raw("   "),
-            Span::styled(
-                "Enter: keep  Esc: clear",
-                Style::default().fg(Color::DarkGray),
-            ),
         ]);
         frame.render_widget(Paragraph::new(search_line), chunks[1]);
     } else {
-        let hint = footer(
-            " j/k: move   h/l: fold   ,: flat/tree   Enter: review   /: search   y: sync   q: quit ",
-            app.status.as_deref(),
-        );
+        let hint = footer("", app.status.as_deref());
         frame.render_widget(hint, chunks[1]);
     }
 }
@@ -126,7 +122,13 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
 /// Build a deck-list row: indentation + fold marker + label on the left, then
 /// right-aligned new/learn/review counts colored like Anki (new = blue,
 /// learn = red, review = green).
-fn deck_row(label: &str, depth: usize, marker: &str, counts: &DeckCounts, width: u16) -> Line<'static> {
+fn deck_row(
+    label: &str,
+    depth: usize,
+    marker: &str,
+    counts: &DeckCounts,
+    width: u16,
+) -> Line<'static> {
     let counts_width = COUNT_WIDTH * 3;
     let name_width = (width as usize).saturating_sub(counts_width).max(1);
 
@@ -171,18 +173,24 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     let title = Line::from(vec![
         Span::styled(
             format!(" {} ", app.deck_name),
-            Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Cyan),
         ),
-        Span::raw(if app.answer_shown { " [answer] " } else { " [question] " }),
+        Span::raw(if app.answer_shown {
+            " [answer] "
+        } else {
+            " [question] "
+        }),
     ]);
     frame.render_widget(Paragraph::new(title), chunks[0]);
 
     if app.deck_finished {
-        let done = Paragraph::new("\n🎉 No more cards due in this deck.\n\nPress 'u' to undo the last card, or 'd' to go back to the deck list.")
+        let done = Paragraph::new("\n🎉 No more cards due in this deck.")
             .alignment(ratatui::layout::Alignment::Center)
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(done, chunks[1]);
-        let hint = footer(" u: undo   d: decks   q: quit ", app.status.as_deref());
+        let hint = footer("", app.status.as_deref());
         frame.render_widget(hint, chunks[2]);
         return;
     }
@@ -190,7 +198,7 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     let Some(card) = app.card.as_mut() else {
         let msg = Paragraph::new("Loading…").block(Block::default().borders(Borders::ALL));
         frame.render_widget(msg, chunks[1]);
-        let hint = footer(" d: decks   q: quit ", app.status.as_deref());
+        let hint = footer("", app.status.as_deref());
         frame.render_widget(hint, chunks[2]);
         return;
     };
@@ -209,12 +217,11 @@ fn render_review(frame: &mut Frame, app: &mut App) {
     };
     render_card_body(frame, chunks[1], side, app.scroll, title);
 
-    // Footer: grading hints once the answer is shown.
+    // Footer: only grading hints remain visible outside the help popup.
     let hint_text = if app.answer_shown {
         grade_hint(&card.buttons, &card.next_reviews)
     } else {
-        " space: show answer   j/k: scroll   r: replay   i: info   u: undo   d: decks   q: quit "
-            .to_string()
+        String::new()
     };
     let hint = footer(&hint_text, app.status.as_deref());
     frame.render_widget(hint, chunks[2]);
@@ -299,10 +306,7 @@ fn grade_hint(buttons: &[i64], next_reviews: &[String]) -> String {
             }
         }
     }
-    format!(
-        " {}   space: good   r: replay   i: info   u: undo   d: decks   q: quit ",
-        parts.join("  ")
-    )
+    format!(" {} ", parts.join("  "))
 }
 
 /// A centered rectangle covering `pct_x`/`pct_y` percent of `area`.
@@ -362,7 +366,10 @@ fn render_stats_popup(frame: &mut Frame, area: Rect, stats: &CardStats, scroll: 
     if !stats.history.is_empty() {
         lines.push(Line::raw(""));
         lines.push(Line::styled(
-            format!("{:<18}{:<9}{:<8}{:<13}{}", "Date", "Type", "Rating", "Interval", "Time"),
+            format!(
+                "{:<18}{:<9}{:<8}{:<13}{}",
+                "Date", "Type", "Rating", "Interval", "Time"
+            ),
             Style::default().add_modifier(Modifier::BOLD),
         ));
         for row in &stats.history {
@@ -393,6 +400,58 @@ fn render_stats_popup(frame: &mut Frame, area: Rect, stats: &CardStats, scroll: 
     frame.render_widget(para, inner);
 }
 
+/// Render the global keybinding reference.
+fn render_help_popup(frame: &mut Frame, area: Rect) {
+    let area = centered_rect(72, 90, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Help ")
+        .title_style(Style::default().add_modifier(Modifier::BOLD));
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+
+    let lines = vec![
+        help_heading("Global"),
+        help_binding("? / Esc", "close help"),
+        help_binding("q / y", "quit / sync"),
+        help_heading("Decks"),
+        help_binding("j/k, ↑/↓", "move; Ctrl-d/u: page"),
+        help_binding("g g / G", "first / last deck"),
+        help_binding("h/l, ←/→", "fold / unfold or review"),
+        help_binding("Enter / ,", "review / flat-tree view"),
+        help_binding("/", "search decks"),
+        help_binding("Enter/Esc/Bksp", "keep / clear / edit search"),
+        help_heading("Review"),
+        help_binding("Space / Enter", "show answer / grade Good"),
+        help_binding("1/2/3/4", "Again / Hard / Good / Easy"),
+        help_binding("j/k, ↑/↓ / r", "scroll / replay audio"),
+        help_binding("i / u / d", "info / undo / decks"),
+        help_heading("Card Info"),
+        help_binding("j/k, ↑/↓", "scroll; i/Esc: close"),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn help_heading(text: &str) -> Line<'static> {
+    Line::styled(
+        text.to_string(),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn help_binding(key: &str, action: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("  {key:<16}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(action.to_string()),
+    ])
+}
+
 /// A one-line footer; shows a status/error message when present, else the hint.
 fn footer<'a>(hint: &'a str, status: Option<&'a str>) -> Paragraph<'a> {
     match status {
@@ -401,5 +460,17 @@ fn footer<'a>(hint: &'a str, status: Option<&'a str>) -> Paragraph<'a> {
             Style::default().fg(Color::Black).bg(Color::Yellow),
         ))),
         None => Paragraph::new(Line::from(hint.dim())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::grade_hint;
+
+    #[test]
+    fn grade_hint_only_contains_available_grades_and_intervals() {
+        let hint = grade_hint(&[1, 3], &["<1m".into(), "10m".into()]);
+
+        assert_eq!(hint, " 1:Again(<1m)  3:Good(10m) ");
     }
 }

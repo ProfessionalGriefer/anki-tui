@@ -95,6 +95,8 @@ pub struct App {
     pub stats: Option<CardStats>,
     /// Vertical scroll offset within the card-info popup.
     pub stats_scroll: u16,
+    /// Whether the keybinding help popup is open.
+    pub help_open: bool,
 
     /// Transient status / error message shown in the footer.
     pub status: Option<String>,
@@ -131,8 +133,13 @@ impl App {
             undone: false,
             stats: None,
             stats_scroll: 0,
+            help_open: false,
             status: None,
-        should_quit: false,
+            should_quit: false,
         })
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.help_open = !self.help_open;
     }
 }
