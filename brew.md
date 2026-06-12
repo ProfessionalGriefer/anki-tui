@@ -2,13 +2,22 @@
 
 `anki-tui` is distributed through the personal tap at
 [`professionalgriefer/homebrew-tap`](https://github.com/professionalgriefer/homebrew-tap).
-The formula installs a **prebuilt binary** that you build locally and attach to a
-GitHub Release. This is macOS arm64 only (the machine the binary is built on) —
-it is meant for personal use, not general distribution.
+The formula installs a **prebuilt binary** produced by the release workflow and
+attached to a GitHub Release. This is macOS arm64 only — it is meant for
+personal use, not general distribution.
+
+## One-time setup
+
+Add a fine-grained personal access token named `HOMEBREW_TAP_TOKEN` to the
+`anki-tui` repository's GitHub Actions secrets. Give the token **Contents:
+Read and write** access to `professionalgriefer/homebrew-tap`.
+
+The release workflow uses this token because the repository-scoped
+`GITHUB_TOKEN` for `anki-tui` cannot push to the separate tap repository.
 
 ## Releasing a new version
 
-### 1. Tag the release
+Update the version in `Cargo.toml`, commit it, then tag the release:
 
 ```sh
 cd anki-tui
@@ -22,77 +31,30 @@ git push origin v0.1.0    # see note below
 > Adjust `-r @-` to whichever revision you're releasing (`@-` is the parent of the
 > working-copy commit).
 
-### 2. Build the binary
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
 
-```sh
-cargo build --release
-```
-
-The binary lands at `target/release/anki-tui`.
-
-### 3. Package it
-
-```sh
-tar -czf anki-tui-aarch64-apple-darwin.tar.gz -C target/release anki-tui
-shasum -a 256 anki-tui-aarch64-apple-darwin.tar.gz
-```
-
-### 4. Create the GitHub Release and upload the tarball
-
-```sh
-gh release create v0.1.0 anki-tui-aarch64-apple-darwin.tar.gz \
-  --title v0.1.0 --notes "..."
-```
-
-The download URL is then:
-
-```
-https://github.com/professionalgriefer/anki-tui/releases/download/v0.1.0/anki-tui-aarch64-apple-darwin.tar.gz
-```
-
-### 5. Update the formula in the tap
-
-Edit `Formula/anki-tui.rb` in the tap repo:
-
-```ruby
-class AnkiTui < Formula
-  desc "Keyboard-driven terminal reviewer for Anki (via AnkiConnect)"
-  homepage "https://github.com/professionalgriefer/anki-tui"
-  url "https://github.com/professionalgriefer/anki-tui/releases/download/v0.1.0/anki-tui-aarch64-apple-darwin.tar.gz"
-  sha256 "<sha256 from step 3>"
-  version "0.1.0"
-  license "MIT"
-
-  depends_on :macos
-  depends_on arch: :arm64
-
-  def install
-    bin.install "anki-tui"
-  end
-
-  test do
-    assert_path_exists bin/"anki-tui"
-  end
-end
-```
-
-For each new release, bump the `url` + `version` to the new tag and replace the
-`sha256`. That's the entire release cadence.
+1. Checks that the tag matches the version in `Cargo.toml`.
+2. Builds and packages the macOS arm64 binary.
+3. Creates a GitHub Release and uploads the tarball.
+4. Updates the tap formula's `url`, `sha256`, and `version`.
+5. Commits and pushes the formula change to the tap.
 
 > **License note:** `Cargo.toml` currently has no `license` field and there's no
 > `LICENSE` file. Either add one or correct/remove the `license` line, otherwise
 > `brew audit` will warn.
 
-### 6. Commit and push the tap, then install
+After the workflow succeeds, install or upgrade the formula:
 
 ```sh
 brew install professionalgriefer/tap/anki-tui
 # or:
 brew tap professionalgriefer/tap
 brew install anki-tui
+# subsequent releases:
+brew upgrade anki-tui
 ```
 
-## Testing the formula locally before pushing
+## Testing the formula locally
 
 ```sh
 brew install ./Formula/anki-tui.rb

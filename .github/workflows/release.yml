@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    env:
+      ARCHIVE: anki-tui-aarch64-apple-darwin.tar.gz
+      TARGET: aarch64-apple-darwin
+
+    steps:
+      - name: Check out anki-tui
+        uses: actions/checkout@v4
+
+      - name: Validate tag
+        run: |
+          cargo_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "anki-tui") | .version')"
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          if [[ "$tag_version" != "$cargo_version" ]]; then
+            echo "Tag version $tag_version does not match Cargo.toml version $cargo_version"
+            exit 1
+          fi
+
+      - name: Install Rust target
+        run: rustup target add "$TARGET"
+
+      - name: Build release archive
+        run: |
+          cargo build --release --locked --target "$TARGET"
+          tar -czf "$ARCHIVE" -C "target/$TARGET/release" anki-tui
+          echo "SHA256=$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ARCHIVE" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ARCHIVE" --generate-notes --verify-tag
+          fi
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: professionalgriefer/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        run: ruby .github/scripts/update-homebrew-formula.rb homebrew-tap/Formula/anki-tui.rb "$GITHUB_REF_NAME" "$SHA256"
+
+      - name: Commit and push Homebrew formula
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/anki-tui.rb
+
+          if git diff --cached --quiet; then
+            echo "Formula is already up to date"
+          else
+            git commit -m "anki-tui ${GITHUB_REF_NAME}"
+            git push
+          fi
