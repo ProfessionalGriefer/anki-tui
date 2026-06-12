@@ -2,40 +2,40 @@
 
 `anki-tui` is distributed through the personal tap at
 [`professionalgriefer/homebrew-tap`](https://github.com/professionalgriefer/homebrew-tap).
-The formula installs a **prebuilt binary** produced by the release workflow and
-attached to a GitHub Release. This is macOS arm64 only — it is meant for
+The formula installs a **prebuilt binary** produced by the local release script
+and attached to a GitHub Release. This is macOS arm64 only — it is meant for
 personal use, not general distribution.
 
 ## One-time setup
 
-Add a fine-grained personal access token named `HOMEBREW_TAP_TOKEN` to the
-`anki-tui` repository's GitHub Actions secrets. Give the token **Contents:
-Read and write** access to `professionalgriefer/homebrew-tap`.
+Install and authenticate the GitHub CLI:
 
-The release workflow uses this token because the repository-scoped
-`GITHUB_TOKEN` for `anki-tui` cannot push to the separate tap repository.
+```sh
+gh auth login
+```
+
+Clone the tap next to this repository, at `../homebrew-tap`. To keep it
+elsewhere, set `HOMEBREW_TAP_REPO` to its path when running the release script.
 
 ## Releasing a new version
 
-Update the version in `Cargo.toml`, commit it, then tag the release:
+Update the version in `Cargo.toml`, commit it, and create the matching tag:
 
 ```sh
 cd anki-tui
 jj tag set v0.1.0 -r @-   # tag the release commit (match the version in Cargo.toml)
-git push origin v0.1.0    # see note below
+scripts/release.sh v0.1.0
 ```
 
-> **Why `git push` for the tag?** `jj` can create the tag (`jj tag set`, exported
-> to Git automatically in a colocated repo), but `jj git push` only pushes
-> bookmarks — it does not push tags yet. So the tag itself is pushed with `git`.
-> Adjust `-r @-` to whichever revision you're releasing (`@-` is the parent of the
-> working-copy commit).
+Adjust `-r @-` to whichever revision you're releasing (`@-` is the parent of the
+working-copy commit). The release script requires that the tag points at Git
+`HEAD`.
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
+The script:
 
-1. Checks that the tag matches the version in `Cargo.toml`.
+1. Checks that both repositories are clean and the tag matches `Cargo.toml`.
 2. Builds and packages the macOS arm64 binary.
-3. Creates a GitHub Release and uploads the tarball.
+3. Pushes the tag, creates a GitHub Release, and uploads the tarball.
 4. Updates the tap formula's `url`, `sha256`, and `version`.
 5. Commits and pushes the formula change to the tap.
 
@@ -43,7 +43,7 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
 > `LICENSE` file. Either add one or correct/remove the `license` line, otherwise
 > `brew audit` will warn.
 
-After the workflow succeeds, install or upgrade the formula:
+After the script succeeds, install or upgrade the formula:
 
 ```sh
 brew install professionalgriefer/tap/anki-tui
