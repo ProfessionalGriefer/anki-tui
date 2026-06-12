@@ -42,39 +42,12 @@ pub struct ReviewCard {
     pub next_reviews: Vec<String>,
 }
 
-/// The kind of a revlog entry, used for coloring the history table.
-#[derive(Clone, Copy)]
-pub enum ReviewKind {
-    Learn,
-    Review,
-    Relearn,
-    Filtered,
-}
-
-impl ReviewKind {
-    pub fn from_code(code: i64) -> Self {
-        match code {
-            0 => ReviewKind::Learn,
-            2 => ReviewKind::Relearn,
-            3 => ReviewKind::Filtered,
-            _ => ReviewKind::Review,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            ReviewKind::Learn => "Learn",
-            ReviewKind::Review => "Review",
-            ReviewKind::Relearn => "Relearn",
-            ReviewKind::Filtered => "Filtered",
-        }
-    }
-}
-
-/// One row of the review-history table in the card-info popup.
+/// One row of the review-history table in the card-info popup. `kind` is the
+/// raw revlog type (0 learn, 1 review, 2 relearn, 3 filtered); the UI maps it
+/// to a label and color.
 pub struct ReviewRow {
     pub date: String,
-    pub kind: ReviewKind,
+    pub kind: i64,
     pub rating: i64,
     pub interval: String,
     pub time: String,

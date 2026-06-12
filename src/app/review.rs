@@ -3,7 +3,7 @@
 use anyhow::Result;
 use chrono::{Local, TimeZone};
 
-use super::{App, CardStats, GRADE_LABELS, ReviewCard, ReviewKind, ReviewRow};
+use super::{App, CardStats, GRADE_LABELS, ReviewCard, ReviewRow};
 use crate::media::SideMedia;
 
 impl App {
@@ -197,15 +197,16 @@ impl App {
 
         let mut rows: Vec<(String, String)> = Vec::new();
         // The note id encodes the note's creation time (epoch ms).
-        rows.push(("Added".into(), fmt_date(info.note)));
+        rows.push(("Added".into(), fmt_local(info.note, "%Y-%m-%d")));
         if let Some(first) = reviews.first() {
-            rows.push(("First Review".into(), fmt_date(first.id)));
+            rows.push(("First Review".into(), fmt_local(first.id, "%Y-%m-%d")));
         }
         if let Some(last) = reviews.last() {
-            rows.push(("Latest Review".into(), fmt_date(last.id)));
+            rows.push(("Latest Review".into(), fmt_local(last.id, "%Y-%m-%d")));
             // A review card's next due date is its last review plus the interval.
-            if info.queue == 2 && info.interval > 0 {
-                rows.push(("Due".into(), fmt_date_plus_days(last.id, info.interval)));
+            if info.queue == REVIEW_QUEUE && info.interval > 0 {
+                let due = last.id + info.interval * MS_PER_DAY;
+                rows.push(("Due".into(), fmt_local(due, "%Y-%m-%d")));
             }
         }
         rows.push(("Interval".into(), fmt_days(info.interval)));
@@ -218,8 +219,8 @@ impl App {
         if !reviews.is_empty() {
             let total_ms: i64 = reviews.iter().map(|r| r.time).sum();
             let avg_ms = total_ms / reviews.len() as i64;
-            rows.push(("Average Time".into(), fmt_duration_long(avg_ms)));
-            rows.push(("Total Time".into(), fmt_duration_long(total_ms)));
+            rows.push(("Average Time".into(), fmt_duration(avg_ms, true)));
+            rows.push(("Total Time".into(), fmt_duration(total_ms, true)));
         }
         rows.push(("Note Type".into(), info.model_name));
         rows.push(("Deck".into(), info.deck_name));
@@ -231,11 +232,11 @@ impl App {
             .iter()
             .rev()
             .map(|r| ReviewRow {
-                date: fmt_datetime(r.id),
-                kind: ReviewKind::from_code(r.kind),
+                date: fmt_local(r.id, "%Y-%m-%d @ %H:%M"),
+                kind: r.kind,
                 rating: r.ease,
                 interval: fmt_revlog_ivl(r.ivl),
-                time: fmt_duration_short(r.time),
+                time: fmt_duration(r.time, false),
             })
             .collect();
 
@@ -243,30 +244,18 @@ impl App {
     }
 }
 
-/// Format an epoch-ms timestamp as a local `YYYY-MM-DD` date.
-fn fmt_date(ms: i64) -> String {
-    match Local.timestamp_millis_opt(ms).single() {
-        Some(dt) => dt.format("%Y-%m-%d").to_string(),
-        None => "?".into(),
-    }
-}
+/// AnkiConnect's `queue` value for a card in the review (graduated) queue.
+const REVIEW_QUEUE: i64 = 2;
+/// Milliseconds in a day, for projecting a due date from a review timestamp.
+const MS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 
-/// Format an epoch-ms timestamp as a local `YYYY-MM-DD @ HH:MM`.
-fn fmt_datetime(ms: i64) -> String {
-    match Local.timestamp_millis_opt(ms).single() {
-        Some(dt) => dt.format("%Y-%m-%d @ %H:%M").to_string(),
-        None => "?".into(),
-    }
-}
-
-/// Format `ms` plus a whole number of days, as a local date.
-fn fmt_date_plus_days(ms: i64, days: i64) -> String {
-    match Local.timestamp_millis_opt(ms).single() {
-        Some(dt) => (dt + chrono::Duration::days(days))
-            .format("%Y-%m-%d")
-            .to_string(),
-        None => "?".into(),
-    }
+/// Format an epoch-ms timestamp in local time with the given `chrono` format.
+fn fmt_local(ms: i64, fmt: &str) -> String {
+    Local
+        .timestamp_millis_opt(ms)
+        .single()
+        .map(|dt| dt.format(fmt).to_string())
+        .unwrap_or_else(|| "?".into())
 }
 
 /// Human-readable interval given a count of days (the card's current interval).
@@ -305,22 +294,14 @@ fn plural(n: i64) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// Compact duration for the history table's time column (e.g. `7.25s`, `1.8m`).
-fn fmt_duration_short(ms: i64) -> String {
+/// Format a millisecond duration. `verbose` gives the long form for the
+/// average/total rows (`19.6 seconds`), else the compact history form (`7.25s`).
+fn fmt_duration(ms: i64, verbose: bool) -> String {
     let secs = ms as f64 / 1000.0;
-    if secs < 60.0 {
-        format!("{secs:.2}s")
-    } else {
-        format!("{:.1}m", secs / 60.0)
-    }
-}
-
-/// Verbose duration for the average/total time rows (e.g. `19.6 seconds`).
-fn fmt_duration_long(ms: i64) -> String {
-    let secs = ms as f64 / 1000.0;
-    if secs < 60.0 {
-        format!("{secs:.1} seconds")
-    } else {
-        format!("{:.2} minutes", secs / 60.0)
+    match (secs < 60.0, verbose) {
+        (true, true) => format!("{secs:.1} seconds"),
+        (true, false) => format!("{secs:.2}s"),
+        (false, true) => format!("{:.2} minutes", secs / 60.0),
+        (false, false) => format!("{:.1}m", secs / 60.0),
     }
 }

@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui_image::StatefulImage;
 
 use crate::anki::DeckCounts;
-use crate::app::{App, CardStats, GRADE_LABELS, ReviewKind, Screen};
+use crate::app::{App, CardStats, GRADE_LABELS, Screen};
 use crate::media::{Block as ContentBlock, SideMedia, render_html};
 
 /// Width reserved by the list's highlight gutter (selection shown via bg color,
@@ -362,22 +362,27 @@ fn render_stats_popup(frame: &mut Frame, area: Rect, stats: &CardStats, scroll: 
     if !stats.history.is_empty() {
         lines.push(Line::raw(""));
         lines.push(Line::styled(
-            history_cells("Date", "Type", "Rating", "Interval", "Time"),
+            format!("{:<18}{:<9}{:<8}{:<13}{}", "Date", "Type", "Rating", "Interval", "Time"),
             Style::default().add_modifier(Modifier::BOLD),
         ));
         for row in &stats.history {
+            // Map the raw revlog type to Anki's label and color.
+            let (label, color) = match row.kind {
+                0 => ("Learn", Color::Blue),
+                2 => ("Relearn", Color::Red),
+                3 => ("Filtered", Color::Cyan),
+                _ => ("Review", Color::Green),
+            };
+            // Again (1) is the only rating Anki colors (red).
+            let rating_style = if row.rating == 1 {
+                Style::default().fg(Color::Red)
+            } else {
+                Style::default()
+            };
             lines.push(Line::from(vec![
                 Span::raw(format!("{:<18}", row.date)),
-                Span::styled(format!("{:<9}", row.kind.label()), kind_style(row.kind)),
-                Span::styled(
-                    format!("{:<8}", row.rating),
-                    // Again (1) is the only rating Anki colors (red).
-                    if row.rating == 1 {
-                        Style::default().fg(Color::Red)
-                    } else {
-                        Style::default()
-                    },
-                ),
+                Span::styled(format!("{label:<9}"), Style::default().fg(color)),
+                Span::styled(format!("{:<8}", row.rating), rating_style),
                 Span::raw(format!("{:<13}", row.interval)),
                 Span::raw(row.time.clone()),
             ]));
@@ -386,22 +391,6 @@ fn render_stats_popup(frame: &mut Frame, area: Rect, stats: &CardStats, scroll: 
 
     let para = Paragraph::new(lines).scroll((scroll, 0));
     frame.render_widget(para, inner);
-}
-
-/// Lay the history table's five columns out at fixed widths.
-fn history_cells(date: &str, kind: &str, rating: &str, interval: &str, time: &str) -> String {
-    format!("{date:<18}{kind:<9}{rating:<8}{interval:<13}{time}")
-}
-
-/// The color Anki uses for each review type in the history table.
-fn kind_style(kind: ReviewKind) -> Style {
-    let color = match kind {
-        ReviewKind::Learn => Color::Blue,
-        ReviewKind::Review => Color::Green,
-        ReviewKind::Relearn => Color::Red,
-        ReviewKind::Filtered => Color::Cyan,
-    };
-    Style::default().fg(color)
 }
 
 /// A one-line footer; shows a status/error message when present, else the hint.
