@@ -1,12 +1,12 @@
-# Running anki-tui in a floating tmux popup, toggled by Claude Code
+# Running anki-tui in a floating tmux popup, toggled by Claude Code or Codex
 
 This sets up `anki-tui` to live in a **floating tmux popup** that:
 
 - runs in a **persistent, detached tmux session** — the same `anki-tui` instance
   survives being hidden/shown (it is never quit and restarted);
-- **auto-shows while Claude Code is working** and **auto-hides when Claude needs
-  you** (so you review cards while Claude thinks, and drop back to the chat when
-  it's your turn);
+- **auto-shows while the agent is working** and **auto-hides when it needs you**
+  (so you review cards while the agent thinks, and drop back to the chat when
+  it's your turn) — wired for both **Claude Code** and the **Codex CLI**;
 - can also be **opened manually** with a tmux key binding any time.
 
 It works by keeping `anki-tui` in a tmux session named `anki`. "Showing" attaches
@@ -154,6 +154,73 @@ then it fires in every project, not just this one):
 > directories that already had a settings file when the session started. If you
 > just created `.claude/settings.json`, the hooks won't fire until you open
 > `/hooks` once (which reloads config) or restart Claude Code.
+
+## 4. The Codex CLI hooks
+
+Codex (the OpenAI `codex` CLI) has its own hooks system that drives the same
+script. Codex auto-discovers a `hooks.json` in each config folder — `~/.codex/`
+(global, every project) or `<project>/.codex/` (that repo only) — so no
+`config.toml` pointer is needed. To make the popup follow Codex's attention
+everywhere, save this as `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/vincent/.claude/anki-pane.sh show",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/vincent/.claude/anki-pane.sh hide"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/vincent/.claude/anki-pane.sh hide"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+| Event               | Action           | Meaning                                                       |
+| ------------------- | ---------------- | ------------------------------------------------------------- |
+| `UserPromptSubmit`  | `show` (`async`) | you send a prompt → Codex starts working → anki-tui floats up |
+| `Stop`              | `hide`           | Codex finishes and hands control back → popup closes          |
+| `PermissionRequest` | `hide`           | Codex asks to approve a command mid-turn → popup closes       |
+
+Differences from the Claude config above:
+
+- **Event keys are the same CamelCase names**, but the file is `hooks.json` (not
+  `settings.json`) and the hook entries live under a top-level `"hooks"` object.
+- `PermissionRequest` is Codex's analog of Claude's `Notification` — it fires
+  when Codex needs you to approve something, so hiding there keeps the popup from
+  covering the approval prompt.
+- Unlike Claude, Codex's command must be an **absolute path** (it does not expand
+  `~`), hence `/Users/vincent/.claude/anki-pane.sh`.
+
+> **Trust caveat:** Codex gates newly added hooks behind a **trust prompt** — they
+> won't run until you approve them on the next `codex` launch. To confirm the
+> wiring without the prompt, launch once with
+> `codex --dangerously-bypass-hook-trust`.
 
 ## How show/hide stays the same instance
 
