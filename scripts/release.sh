@@ -10,6 +10,8 @@ tap_repo="${HOMEBREW_TAP_REPO:-"$repo_root/../homebrew-tap"}"
 target="aarch64-apple-darwin"
 archive="anki-tui-$target.tar.gz"
 formula="$tap_repo/Formula/anki-tui.rb"
+tap_branch="$(git -C "$tap_repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
+tap_branch="${tap_branch#origin/}"
 
 if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "usage: scripts/release.sh vX.Y.Z" >&2
@@ -75,7 +77,7 @@ if git -C "$tap_repo" diff --cached --quiet; then
   echo "Homebrew formula is already up to date"
 else
   git -C "$tap_repo" commit -m "anki-tui $tag"
-  git -C "$tap_repo" push
+  git -C "$tap_repo" push origin "HEAD:$tap_branch"
 fi
 
 echo "Released $tag and updated the Homebrew tap"

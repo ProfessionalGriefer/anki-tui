@@ -37,7 +37,8 @@ The script:
 2. Builds and packages the macOS arm64 binary.
 3. Pushes the tag, creates a GitHub Release, and uploads the tarball.
 4. Updates the tap formula's `url`, `sha256`, and `version`.
-5. Commits and pushes the formula change to the tap.
+5. Commits and pushes the formula change to the tap. This works with colocated
+   `jj` repositories even though Git reports a detached `HEAD`.
 
 > **License note:** `Cargo.toml` currently has no `license` field and there's no
 > `LICENSE` file. Either add one or correct/remove the `license` line, otherwise
