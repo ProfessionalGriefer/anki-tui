@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::Result;
+use html2text::render::RichAnnotation;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span, Text};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
@@ -52,14 +55,34 @@ impl SideMedia {
         }
     }
 
-    /// Render the card text to terminal-friendly plain text, wrapped to `width`
-    /// columns. Uses html2text, which handles tags, entities, lists, tables and
-    /// drops `<style>`/`<script>` blocks.
-    pub fn to_text(&self, width: u16) -> String {
+    /// Render the card text to styled terminal text, wrapped to `width` columns.
+    /// Uses html2text's rich renderer so inline markup (`<b>`, `<em>`, `<code>`,
+    /// …) becomes ratatui styling rather than literal `**markers**`; it also
+    /// handles entities, lists, tables, and drops `<style>`/`<script>` blocks.
+    pub fn to_text(&self, width: u16) -> Text<'static> {
         let width = width.max(10) as usize;
-        html2text::config::plain()
-            .string_from_read(self.html.as_bytes(), width)
-            .unwrap_or_else(|_| self.html.clone())
+        let Ok(lines) = html2text::config::rich().lines_from_read(self.html.as_bytes(), width)
+        else {
+            return Text::raw(self.html.clone());
+        };
+
+        let rendered: Vec<Line> = lines
+            .into_iter()
+            .map(|tline| {
+                let spans: Vec<Span> = tline
+                    .into_iter()
+                    .filter_map(|el| match el {
+                        html2text::render::TaggedLineElement::Str(ts) => {
+                            Some(Span::styled(ts.s, annotations_to_style(&ts.tag)))
+                        }
+                        // Fragment anchors carry no visible text.
+                        _ => None,
+                    })
+                    .collect();
+                Line::from(spans)
+            })
+            .collect();
+        Text::from(rendered)
     }
 
     /// Play every audio clip on this side (used on reveal and for the `r` key).
@@ -68,6 +91,25 @@ impl SideMedia {
             play_file(path);
         }
     }
+}
+
+/// Map html2text's rich annotations to a ratatui style. Annotations nest
+/// (e.g. bold inside a link), so accumulate every modifier in the span's tags.
+/// CSS colours from Anki's card styling are intentionally ignored so text keeps
+/// the terminal's own foreground instead of fighting the theme.
+fn annotations_to_style(tags: &[RichAnnotation]) -> Style {
+    let mut style = Style::default();
+    for tag in tags {
+        style = match tag {
+            RichAnnotation::Strong => style.add_modifier(Modifier::BOLD),
+            RichAnnotation::Emphasis => style.add_modifier(Modifier::ITALIC),
+            RichAnnotation::Strikeout => style.add_modifier(Modifier::CROSSED_OUT),
+            RichAnnotation::Code => style.add_modifier(Modifier::DIM),
+            RichAnnotation::Link(_) => style.add_modifier(Modifier::UNDERLINED),
+            _ => style,
+        };
+    }
+    style
 }
 
 /// Pull `src="..."` filenames out of `<img>` tags.
@@ -228,11 +270,42 @@ mod tests {
             images: Vec::new(),
             audio: Vec::new(),
         };
-        let text = side.to_text(40);
+        // Flatten the styled lines back to a string to assert on content.
+        let text: String = side
+            .to_text(40)
+            .lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
         // &nbsp; decodes to U+00A0, so check the words individually.
         assert!(text.contains("Hello"));
         assert!(text.contains("world"));
         assert!(!text.contains("color"));
         assert!(!text.contains("<"));
+    }
+
+    #[test]
+    fn to_text_renders_bold_as_modifier() {
+        let side = SideMedia {
+            html: "Acronym: <b>VVT</b>".to_string(),
+            images: Vec::new(),
+            audio: Vec::new(),
+        };
+        let text = side.to_text(40);
+        // The "VVT" span must carry the BOLD modifier, and no literal `**`
+        // markers should leak into the rendered text.
+        let vvt = text
+            .lines
+            .iter()
+            .flat_map(|l| &l.spans)
+            .find(|s| s.content.contains("VVT"))
+            .expect("VVT span present");
+        assert!(vvt.style.add_modifier.contains(Modifier::BOLD));
+        let joined: String = text
+            .lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(!joined.contains("**"));
     }
 }
