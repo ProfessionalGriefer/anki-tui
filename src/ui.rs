@@ -427,6 +427,7 @@ fn render_help_popup(frame: &mut Frame, area: Rect) {
         help_binding("1/2/3/4", "Again / Hard / Good / Easy"),
         help_binding("j/k, ↑/↓ / r", "scroll / replay audio"),
         help_binding("i / u / d", "info / undo / decks"),
+        help_binding("!", "suspend card"),
         help_heading("Card Info"),
         help_binding("j/k, ↑/↓", "scroll; i/Esc: close"),
     ];

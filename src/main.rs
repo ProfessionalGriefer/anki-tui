@@ -113,6 +113,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char(' ') | KeyCode::Enter => app.space(),
             KeyCode::Char('r') => app.replay_audio(),
             KeyCode::Char('u') => app.undo(),
+            KeyCode::Char('!') => app.suspend_card(),
             KeyCode::Char('j') | KeyCode::Down => app.scroll_down(),
             KeyCode::Char('k') | KeyCode::Up => app.scroll_up(),
             KeyCode::Char('1') => app.grade(1),

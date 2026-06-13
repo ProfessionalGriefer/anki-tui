@@ -141,6 +141,34 @@ impl App {
         }
     }
 
+    /// Suspend the current card so it stops appearing in reviews, then advance.
+    /// The card is stashed in `prev_card` so `u` can un-suspend and restore it
+    /// (via the same `guiUndo` path as undoing a grade).
+    pub fn suspend_card(&mut self) {
+        let Some(card) = &self.card else { return };
+        let card_id = card.card_id;
+        match self.anki.suspend(card_id) {
+            Ok(_) => {
+                self.status = Some("Card suspended — u to undo".to_string());
+                if self.undone {
+                    // The GUI reviewer is already sitting on the next card; the
+                    // suspended card was only shown locally, so just reload.
+                    self.undone = false;
+                    self.prev_card = self.card.take();
+                    self.load_current_card();
+                } else if let Err(e) = self.anki.gui_deck_review(&self.deck_name) {
+                    // Suspending doesn't move the GUI reviewer off the card, so
+                    // continue the deck review to advance to the next due card.
+                    self.status = Some(e.to_string());
+                } else {
+                    self.prev_card = self.card.take();
+                    self.load_current_card();
+                }
+            }
+            Err(e) => self.status = Some(e.to_string()),
+        }
+    }
+
     /// Replay audio for the side currently shown.
     pub fn replay_audio(&self) {
         if let Some(card) = &self.card {
