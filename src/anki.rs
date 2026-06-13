@@ -212,6 +212,14 @@ impl AnkiConnect {
             .unwrap_or(false))
     }
 
+    /// Suspend a card so it stops appearing in reviews. Returns `true` if the
+    /// card wasn't already suspended. Note: this only changes the collection; it
+    /// does NOT move Anki's GUI reviewer off the card.
+    pub fn suspend(&self, card_id: i64) -> Result<bool> {
+        let result = self.invoke("suspend", json!({ "cards": [card_id] }))?;
+        Ok(result.as_bool().unwrap_or(false))
+    }
+
     /// Scheduling metadata for a single card, or `None` if it doesn't exist.
     pub fn card_info(&self, card_id: i64) -> Result<Option<CardInfo>> {
         let result = self.invoke("cardsInfo", json!({ "cards": [card_id] }))?;
