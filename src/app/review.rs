@@ -16,15 +16,23 @@ impl App {
             Ok(Some(c)) => {
                 let question = SideMedia::build(&c.question, &self.anki, &self.picker);
                 let answer = SideMedia::build(&c.answer, &self.anki, &self.picker);
+                // `[sound:...]` tokens only survive in the raw fields, so collect
+                // audio from there (ordered by the note's field order).
+                let mut fields: Vec<_> = c.fields.into_values().collect();
+                fields.sort_by_key(|f| f.order);
+                let field_html: String = fields
+                    .iter()
+                    .map(|f| f.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 let card = ReviewCard {
                     card_id: c.card_id,
                     question,
                     answer,
                     buttons: c.buttons,
                     next_reviews: c.next_reviews,
+                    audio: crate::media::audio_from_html(&field_html, &self.anki),
                 };
-                // Autoplay the question's audio.
-                card.question.play_audio();
                 self.card = Some(card);
                 self.deck_finished = false;
             }
@@ -169,14 +177,12 @@ impl App {
         }
     }
 
-    /// Replay audio for the side currently shown.
-    pub fn replay_audio(&self) {
-        if let Some(card) = &self.card {
-            if self.answer_shown {
-                card.answer.play_audio();
-            } else {
-                card.question.play_audio();
-            }
+    /// Replay the card's audio clips.
+    pub fn replay_audio(&mut self) {
+        match &self.card {
+            Some(card) if !card.audio.is_empty() => crate::media::play_clips(&card.audio),
+            Some(_) => self.status = Some("No audio on this card".to_string()),
+            None => {}
         }
     }
 

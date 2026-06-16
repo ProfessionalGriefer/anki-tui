@@ -42,7 +42,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     if app.help_open {
-        render_help_popup(frame, frame.area());
+        render_help_popup(frame, app, frame.area());
     }
 }
 
@@ -401,7 +401,9 @@ fn render_stats_popup(frame: &mut Frame, area: Rect, stats: &CardStats, scroll: 
 }
 
 /// Render the global keybinding reference.
-fn render_help_popup(frame: &mut Frame, area: Rect) {
+/// The help popup lists only the bindings usable in the current context, so it
+/// mirrors the screen/sub-mode branching in `main.rs::handle_key`.
+fn render_help_popup(frame: &mut Frame, app: &App, area: Rect) {
     let area = centered_rect(72, 90, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -411,26 +413,49 @@ fn render_help_popup(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
 
-    let lines = vec![
+    let mut lines = vec![
         help_heading("Global"),
         help_binding("? / Esc", "close help"),
-        help_binding("q / y", "quit / sync"),
-        help_heading("Decks"),
-        help_binding("j/k, ↑/↓", "move; Ctrl-d/u: page"),
-        help_binding("g g / G", "first / last deck"),
-        help_binding("h/l, ←/→", "fold / unfold or review"),
-        help_binding("Enter / ,", "review / flat-tree view"),
-        help_binding("/", "search decks"),
-        help_binding("Enter/Esc/Bksp", "keep / clear / edit search"),
-        help_heading("Review"),
-        help_binding("Space / Enter", "show answer / grade Good"),
-        help_binding("1/2/3/4", "Again / Hard / Good / Easy"),
-        help_binding("j/k, ↑/↓ / r", "scroll / replay audio"),
-        help_binding("i / u / d", "info / undo / decks"),
-        help_binding("!", "suspend card"),
-        help_heading("Card Info"),
-        help_binding("j/k, ↑/↓", "scroll; i/Esc: close"),
+        help_binding("q", "quit"),
+        help_binding("y", "sync"),
     ];
+    match app.screen {
+        Screen::DeckList if app.searching => {
+            lines.push(help_heading("Search decks"));
+            lines.push(help_binding("type", "filter decks"));
+            lines.push(help_binding("j/k, ↑/↓", "move"));
+            lines.push(help_binding("Ctrl-d/u", "page down / up"));
+            lines.push(help_binding("Enter", "keep search"));
+            lines.push(help_binding("Esc", "clear search"));
+            lines.push(help_binding("Bksp", "edit search"));
+        }
+        Screen::DeckList => {
+            lines.push(help_heading("Decks"));
+            lines.push(help_binding("j/k, ↑/↓", "move"));
+            lines.push(help_binding("Ctrl-d/u", "page down / up"));
+            lines.push(help_binding("g g / G", "first / last deck"));
+            lines.push(help_binding("h/l, ←/→", "fold / unfold or review"));
+            lines.push(help_binding("Enter", "review"));
+            lines.push(help_binding(",", "flat-tree view"));
+            lines.push(help_binding("/", "search decks"));
+        }
+        Screen::Review if app.stats.is_some() => {
+            lines.push(help_heading("Card Info"));
+            lines.push(help_binding("j/k, ↑/↓", "scroll"));
+            lines.push(help_binding("i / Esc", "close"));
+        }
+        Screen::Review => {
+            lines.push(help_heading("Review"));
+            lines.push(help_binding("Space / Enter", "show answer / grade Good"));
+            lines.push(help_binding("1/2/3/4", "Again / Hard / Good / Easy"));
+            lines.push(help_binding("j/k, ↑/↓", "scroll"));
+            lines.push(help_binding("r", "replay audio"));
+            lines.push(help_binding("i", "card info"));
+            lines.push(help_binding("u", "undo"));
+            lines.push(help_binding("d", "back to decks"));
+            lines.push(help_binding("!", "suspend card"));
+        }
+    }
     frame.render_widget(Paragraph::new(lines), inner);
 }
 

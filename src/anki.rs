@@ -39,6 +39,20 @@ pub struct CurrentCard {
     /// Next-interval preview labels aligned with `buttons` (e.g. `["<1m", "10m"]`).
     #[serde(default, rename = "nextReviews")]
     pub next_reviews: Vec<String>,
+    /// Raw note fields keyed by name. Unlike the rendered `question`/`answer`
+    /// HTML (where Anki replaces `[sound:...]` with replay buttons), these still
+    /// carry the original `[sound:...]` tokens, so they are the only reliable
+    /// source of audio filenames.
+    #[serde(default)]
+    pub fields: std::collections::HashMap<String, Field>,
+}
+
+/// One note field value from `guiCurrentCard`.
+#[derive(Debug, Deserialize)]
+pub struct Field {
+    pub value: String,
+    #[serde(default)]
+    pub order: i64,
 }
 
 /// Scheduling metadata for a single card (subset of `cardsInfo`).

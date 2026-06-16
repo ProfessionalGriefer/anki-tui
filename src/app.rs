@@ -1,6 +1,7 @@
 //! Application state machine: deck list and review screens.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use ratatui_image::picker::Picker;
@@ -40,6 +41,10 @@ pub struct ReviewCard {
     pub answer: SideMedia,
     pub buttons: Vec<i64>,
     pub next_reviews: Vec<String>,
+    /// Audio clips pulled from the note's fields, replayed on demand with `r`.
+    /// Card-level (not per-side) because the rendered HTML doesn't reveal which
+    /// side a `[sound:...]` belongs to.
+    pub audio: Vec<PathBuf>,
 }
 
 /// One row of the review-history table in the card-info popup. `kind` is the

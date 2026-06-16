@@ -103,9 +103,28 @@ impl SideMedia {
 
     /// Play every audio clip on this side (used on reveal and for the `r` key).
     pub fn play_audio(&self) {
-        for path in &self.audio {
-            play_file(path);
-        }
+        play_clips(&self.audio);
+    }
+}
+
+/// Fetch playable audio clips for every `[sound:...]` token in `html`, returning
+/// temp-file paths. Use this on raw note field values: the rendered
+/// question/answer HTML from AnkiConnect has these tokens replaced by replay
+/// buttons, so the fields are the only place the filenames survive.
+pub fn audio_from_html(html: &str, anki: &AnkiConnect) -> Vec<PathBuf> {
+    extract_audio(html)
+        .into_iter()
+        .filter_map(|name| match anki.retrieve_media_file(&name) {
+            Ok(Some(bytes)) => write_temp(&name, &bytes).ok(),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Play a set of audio clips in the background.
+pub fn play_clips(clips: &[PathBuf]) {
+    for path in clips {
+        play_file(path);
     }
 }
 
