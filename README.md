@@ -24,6 +24,10 @@ no card creation, no browser, and no statistics — just decks and reviews.
 - **Audio** — `[sound:...]` references are fetched from Anki's media collection
   and played through the system audio player (`afplay` on macOS).
 - **Vim-style keybindings** (see below).
+- **Study-while-you-wait popup** — optional tmux wiring floats `anki-tui` over
+  your terminal while an AI coding agent (Claude Code or the Codex CLI) is
+  working, and hides it when the agent needs you. See
+  [tmux.md](tmux.md).
 
 ## Requirements
 
