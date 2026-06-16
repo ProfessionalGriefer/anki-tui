@@ -121,11 +121,19 @@ pub fn audio_from_html(html: &str, anki: &AnkiConnect) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Play a set of audio clips in the background.
+/// Play a set of audio clips in the background, one after another. A single
+/// detached thread plays each clip to completion before starting the next, so
+/// multiple clips on a side don't overlap into noise.
 pub fn play_clips(clips: &[PathBuf]) {
-    for path in clips {
-        play_file(path);
+    if clips.is_empty() {
+        return;
     }
+    let clips = clips.to_vec();
+    std::thread::spawn(move || {
+        for path in &clips {
+            play_file(path);
+        }
+    });
 }
 
 /// Strip media tokens from an HTML fragment and, if anything renderable is left,
@@ -280,22 +288,12 @@ fn attr_value(tag: &str, attr: &str) -> Option<String> {
 }
 
 /// Remove media tokens that html2text would otherwise render as stray text:
-/// `[sound:…]` references and `<img>` tags (we render images separately).
+/// `[sound:…]` references, the `[anki:play:…]` replay placeholders that Anki
+/// substitutes for them in rendered question/answer HTML, and `<img>` tags (we
+/// render images separately).
 fn strip_media_tokens(html: &str) -> String {
-    // Remove [sound:…] tokens.
-    let mut s = String::with_capacity(html.len());
-    let mut rest = html;
-    while let Some(start) = rest.find("[sound:") {
-        s.push_str(&rest[..start]);
-        match rest[start..].find(']') {
-            Some(end) => rest = &rest[start + end + 1..],
-            None => {
-                rest = "";
-                break;
-            }
-        }
-    }
-    s.push_str(rest);
+    let s = strip_bracket_token(html, "[sound:");
+    let s = strip_bracket_token(&s, "[anki:play:");
 
     // Remove <img …> tags.
     let lower = s.to_ascii_lowercase();
@@ -318,6 +316,24 @@ fn strip_media_tokens(html: &str) -> String {
     out
 }
 
+/// Remove every `prefix…]` bracket token from `html`, returning the remainder.
+fn strip_bracket_token(html: &str, prefix: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find(prefix) {
+        out.push_str(&rest[..start]);
+        match rest[start..].find(']') {
+            Some(end) => rest = &rest[start + end + 1..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Temp directory used to stage audio files.
 fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir().join("anki-tui");
@@ -334,15 +350,17 @@ fn write_temp(name: &str, bytes: &[u8]) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Play an audio file in the background using the configured player.
+/// Play an audio file using the configured player, blocking until it finishes.
+/// Always called from the [`play_clips`] background thread, so the wait keeps
+/// clips sequential without blocking the UI. Failures are ignored so a missing
+/// or unplayable clip never stalls the rest.
 fn play_file(path: &PathBuf) {
     let cmd = std::env::var("ANKI_TUI_AUDIO_CMD").unwrap_or_else(|_| "afplay".to_string());
-    // Fire and forget; ignore failures so playback never blocks reviewing.
     let _ = Command::new(cmd)
         .arg(path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn();
+        .status();
 }
 
 #[cfg(test)]
@@ -363,6 +381,15 @@ mod tests {
         assert!(!cleaned.contains("<img"));
         assert!(cleaned.contains("Hello"));
         assert!(cleaned.contains("world"));
+    }
+
+    #[test]
+    fn strips_anki_play_placeholders() {
+        // Rendered question/answer HTML uses these instead of [sound:…].
+        let cleaned = strip_media_tokens("就拿来给叔叔品鉴一下 [anki:play:a:0] tail");
+        assert!(!cleaned.contains("[anki:play"));
+        assert!(cleaned.contains("就拿来给叔叔品鉴一下"));
+        assert!(cleaned.contains("tail"));
     }
 
     #[test]
