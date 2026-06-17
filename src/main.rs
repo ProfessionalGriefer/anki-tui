@@ -92,7 +92,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 KeyCode::Char('l') | KeyCode::Right => app.expand_or_review(),
                 KeyCode::Char('h') | KeyCode::Left => app.collapse_or_parent(),
                 KeyCode::Char(',') => app.toggle_view(),
-                KeyCode::Enter => app.enter_review(),
+                KeyCode::Char('s') | KeyCode::Enter => app.enter_review(),
                 KeyCode::Esc => app.cancel_search(),
                 _ => {}
             }

@@ -456,7 +456,7 @@ fn render_help_popup(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(help_binding("Ctrl-d/u", "page down / up"));
             lines.push(help_binding("g g / G", "first / last deck"));
             lines.push(help_binding("h/l, ←/→", "fold / unfold or review"));
-            lines.push(help_binding("Enter", "review"));
+            lines.push(help_binding("Enter / s", "review"));
             lines.push(help_binding(",", "flat-tree view"));
             lines.push(help_binding("/", "search decks"));
         }
