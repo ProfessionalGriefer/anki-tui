@@ -1,7 +1,9 @@
 //! Deck-list screen: navigation, search, fold tree, and sync.
 
+use anyhow::Result;
+
 use super::persist::{load_decks, save_collapsed};
-use super::{App, DeckInfo, Screen};
+use super::{App, DeckInfo, DeckStats, Screen};
 
 /// How many rows `Ctrl-d`/`Ctrl-u` jump in the deck list.
 const PAGE_JUMP: usize = 10;
@@ -122,6 +124,87 @@ impl App {
                 self.deck_selected = idx;
             }
         }
+    }
+
+    /// `t`: open the deck-stats popup for the selected deck, or close it if open
+    /// (mirrors Anki's stats shortcut). A no-op when no deck is selected.
+    pub fn toggle_deck_stats(&mut self) {
+        if self.deck_stats.is_some() {
+            self.deck_stats = None;
+            return;
+        }
+        // Use the deck under review on the review screen, else the selected deck.
+        let name = match self.screen {
+            Screen::Review => self.deck_name.clone(),
+            Screen::DeckList => {
+                let Some(name) = self
+                    .visible_decks()
+                    .get(self.deck_selected)
+                    .map(|d| d.name.clone())
+                else {
+                    return;
+                };
+                name
+            }
+        };
+        match self.build_deck_stats(&name) {
+            Ok(stats) => self.deck_stats = Some(stats),
+            Err(e) => self.status = Some(e.to_string()),
+        }
+    }
+
+    /// Gather counts for the given deck into the label/value rows shown in the
+    /// popup. New/learn/review come from `getDeckStats` (matching the reviewer);
+    /// the rest are `findCards` counts mirroring Anki's card-counts breakdown.
+    /// Anki's `deck:"X"` search spans subdecks, so these aggregate children like
+    /// the deck browser does. Blank rows (`("", "")`) act as group separators.
+    fn build_deck_stats(&self, name: &str) -> Result<DeckStats> {
+        let counts = self
+            .anki
+            .deck_stats(std::slice::from_ref(&name.to_string()))?
+            .into_values()
+            .next()
+            .unwrap_or_default();
+        let quoted = format!("deck:\"{name}\"");
+        // Counts are best-effort; a failed query falls back to zero.
+        let count = |filter: &str| {
+            let q = if filter.is_empty() {
+                quoted.clone()
+            } else {
+                format!("{quoted} {filter}")
+            };
+            self.anki.find_cards(&q).map(|v| v.len()).unwrap_or(0)
+        };
+        let sep = || (String::new(), String::new());
+        let rows = vec![
+            // Due now (matches the reviewer's remaining counts).
+            ("New".into(), counts.new.to_string()),
+            ("Learning".into(), counts.learn.to_string()),
+            ("Due".into(), counts.review.to_string()),
+            sep(),
+            // Card-state breakdown (Anki's card-counts pie). Young/mature split
+            // review cards at the 21-day maturity threshold.
+            ("Total cards".into(), count("").to_string()),
+            (
+                "Young".into(),
+                count("prop:ivl>=1 prop:ivl<21 -is:suspended").to_string(),
+            ),
+            (
+                "Mature".into(),
+                count("prop:ivl>=21 -is:suspended").to_string(),
+            ),
+            ("Suspended".into(), count("is:suspended").to_string()),
+            ("Buried".into(), count("is:buried").to_string()),
+            sep(),
+            // Today's activity and review burden.
+            ("Reviewed today".into(), count("rated:1").to_string()),
+            ("Flagged".into(), count("-flag:0").to_string()),
+            ("Leeches".into(), count("tag:leech").to_string()),
+        ];
+        Ok(DeckStats {
+            name: name.to_string(),
+            rows,
+        })
     }
 
     /// Persist the current fold state to disk.

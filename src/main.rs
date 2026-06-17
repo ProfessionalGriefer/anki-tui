@@ -62,6 +62,12 @@ fn handle_key(app: &mut App, key: KeyEvent) {
     }
 
     match app.screen {
+        // The deck-stats popup is modal: it captures keys until dismissed.
+        Screen::DeckList if app.deck_stats.is_some() => match code {
+            KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Char('t') | KeyCode::Esc => app.toggle_deck_stats(),
+            _ => {}
+        },
         // While searching, keystrokes edit the filter rather than triggering commands.
         Screen::DeckList if app.searching => match code {
             KeyCode::Esc => app.cancel_search(),
@@ -92,11 +98,18 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 KeyCode::Char('l') | KeyCode::Right => app.expand_or_review(),
                 KeyCode::Char('h') | KeyCode::Left => app.collapse_or_parent(),
                 KeyCode::Char(',') => app.toggle_view(),
+                KeyCode::Char('t') => app.toggle_deck_stats(),
                 KeyCode::Char('s') | KeyCode::Enter => app.enter_review(),
                 KeyCode::Esc => app.cancel_search(),
                 _ => {}
             }
         }
+        // The deck-stats popup is modal: it captures keys until dismissed.
+        Screen::Review if app.deck_stats.is_some() => match code {
+            KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Char('t') | KeyCode::Esc => app.toggle_deck_stats(),
+            _ => {}
+        },
         // The card-info popup is modal: it captures keys until dismissed.
         Screen::Review if app.stats.is_some() => match code {
             KeyCode::Char('q') => app.should_quit = true,
@@ -110,6 +123,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('y') => app.sync(),
             KeyCode::Char('d') if !ctrl => app.back_to_decks(),
             KeyCode::Char('i') => app.toggle_stats(),
+            KeyCode::Char('t') => app.toggle_deck_stats(),
             KeyCode::Char(' ') | KeyCode::Enter => app.space(),
             KeyCode::Char('r') => app.replay_audio(),
             KeyCode::Char('u') => app.undo(),

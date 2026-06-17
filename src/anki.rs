@@ -168,6 +168,13 @@ impl AnkiConnect {
             .collect())
     }
 
+    /// Card ids matching an Anki search query (`findCards`). Used to count cards
+    /// by state for the deck-stats popup.
+    pub fn find_cards(&self, query: &str) -> Result<Vec<i64>> {
+        let result = self.invoke("findCards", json!({ "query": query }))?;
+        Ok(serde_json::from_value(result)?)
+    }
+
     /// Start reviewing the given deck in Anki's GUI reviewer.
     pub fn gui_deck_review(&self, deck: &str) -> Result<bool> {
         let result = self.invoke("guiDeckReview", json!({ "name": deck }))?;

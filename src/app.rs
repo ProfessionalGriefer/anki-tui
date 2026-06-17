@@ -66,6 +66,13 @@ pub struct CardStats {
     pub history: Vec<ReviewRow>,
 }
 
+/// Deck-stats popup contents (Anki's `t` panel): label/value rows for the
+/// selected deck, built on demand from `getDeckStats` and `findCards` counts.
+pub struct DeckStats {
+    pub name: String,
+    pub rows: Vec<(String, String)>,
+}
+
 pub struct App {
     pub anki: AnkiConnect,
     pub picker: Picker,
@@ -84,6 +91,8 @@ pub struct App {
     pub search: String,
     /// Whether the search input is currently capturing keystrokes.
     pub searching: bool,
+    /// When `Some`, the deck-stats popup is open over the deck list.
+    pub deck_stats: Option<DeckStats>,
 
     // Review state.
     pub deck_name: String,
@@ -132,6 +141,7 @@ impl App {
             pending_g: false,
             search: String::new(),
             searching: false,
+            deck_stats: None,
             deck_name: String::new(),
             review_counts: DeckCounts::default(),
             card: None,

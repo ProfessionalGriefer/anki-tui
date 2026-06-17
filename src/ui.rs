@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui_image::StatefulImage;
 
 use crate::anki::DeckCounts;
-use crate::app::{App, CardStats, GRADE_LABELS, Screen};
+use crate::app::{App, CardStats, DeckStats, GRADE_LABELS, Screen};
 use crate::media::{Block as ContentBlock, SideMedia, render_html};
 
 /// Width reserved by the list's highlight gutter (selection shown via bg color,
@@ -19,9 +19,21 @@ const COUNT_WIDTH: usize = 5;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     match app.screen {
-        Screen::DeckList => render_deck_list(frame, app),
+        Screen::DeckList => {
+            render_deck_list(frame, app);
+            // Overlay the deck-stats popup once the deck list's mutable borrow
+            // of `app` has ended.
+            if let Some(stats) = &app.deck_stats {
+                render_deck_stats_popup(frame, frame.area(), stats);
+            }
+        }
         Screen::Review => {
             render_review(frame, app);
+            // Overlay the deck-stats popup once `render_review`'s mutable borrow
+            // of `app` has ended.
+            if let Some(stats) = &app.deck_stats {
+                render_deck_stats_popup(frame, frame.area(), stats);
+            }
             // Overlay the card-info popup once `render_review`'s mutable borrow
             // of `app` has ended, so we can read `app.stats` here.
             if let Some(stats) = &app.stats {
@@ -421,6 +433,52 @@ fn render_stats_popup(frame: &mut Frame, area: Rect, stats: &CardStats, scroll: 
     frame.render_widget(para, inner);
 }
 
+/// Render the deck-stats popup (Anki's `t` panel): label/value rows for the
+/// selected deck. The new/learn/review rows are colored like the deck list.
+fn render_deck_stats_popup(frame: &mut Frame, area: Rect, stats: &DeckStats) {
+    let area = centered_rect(50, 50, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", stats.name))
+        .title_style(Style::default().add_modifier(Modifier::BOLD));
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+
+    let label_w = stats
+        .rows
+        .iter()
+        .map(|(l, _)| l.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let lines: Vec<Line> = stats
+        .rows
+        .iter()
+        .map(|(label, value)| {
+            // Match the deck list's count colors for the scheduling rows, and
+            // Anki's green maturity shades for young/mature.
+            let value_span = match label.as_str() {
+                "New" => Span::styled(value.clone(), Style::default().fg(Color::Blue)),
+                "Learning" => Span::styled(value.clone(), Style::default().fg(Color::Red)),
+                "Due" => Span::styled(value.clone(), Style::default().fg(Color::Green)),
+                "Young" => Span::styled(value.clone(), Style::default().fg(Color::LightGreen)),
+                "Mature" => Span::styled(value.clone(), Style::default().fg(Color::Green)),
+                _ => Span::raw(value.clone()),
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!("{label:<label_w$}  "),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                value_span,
+            ])
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 /// Render the global keybinding reference.
 /// The help popup lists only the bindings usable in the current context, so it
 /// mirrors the screen/sub-mode branching in `main.rs::handle_key`.
@@ -441,6 +499,10 @@ fn render_help_popup(frame: &mut Frame, app: &App, area: Rect) {
         help_binding("y", "sync"),
     ];
     match app.screen {
+        Screen::DeckList if app.deck_stats.is_some() => {
+            lines.push(help_heading("Deck Stats"));
+            lines.push(help_binding("t / Esc", "close"));
+        }
         Screen::DeckList if app.searching => {
             lines.push(help_heading("Search decks"));
             lines.push(help_binding("type", "filter decks"));
@@ -457,8 +519,13 @@ fn render_help_popup(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(help_binding("g g / G", "first / last deck"));
             lines.push(help_binding("h/l, ←/→", "fold / unfold or review"));
             lines.push(help_binding("Enter / s", "review"));
+            lines.push(help_binding("t", "deck stats"));
             lines.push(help_binding(",", "flat-tree view"));
             lines.push(help_binding("/", "search decks"));
+        }
+        Screen::Review if app.deck_stats.is_some() => {
+            lines.push(help_heading("Deck Stats"));
+            lines.push(help_binding("t / Esc", "close"));
         }
         Screen::Review if app.stats.is_some() => {
             lines.push(help_heading("Card Info"));
@@ -472,6 +539,7 @@ fn render_help_popup(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(help_binding("j/k, ↑/↓", "scroll"));
             lines.push(help_binding("r", "replay audio"));
             lines.push(help_binding("i", "card info"));
+            lines.push(help_binding("t", "deck stats"));
             lines.push(help_binding("u", "undo"));
             lines.push(help_binding("d", "back to decks"));
             lines.push(help_binding("!", "suspend card"));
