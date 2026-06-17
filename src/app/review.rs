@@ -45,6 +45,18 @@ impl App {
                 self.card = None;
             }
         }
+        self.refresh_review_counts();
+    }
+
+    /// Refresh the remaining new/learn/review counts for the deck under review.
+    /// `getDeckStats` reports the same aggregate counts (including subdecks) as
+    /// Anki's reviewer. Best-effort: leaves the old counts on failure.
+    fn refresh_review_counts(&mut self) {
+        if let Ok(stats) = self.anki.deck_stats(std::slice::from_ref(&self.deck_name))
+            && let Some(counts) = stats.into_values().next()
+        {
+            self.review_counts = counts;
+        }
     }
 
     /// Space bar: reveal the answer if hidden, else grade Good (like Anki).
@@ -136,6 +148,7 @@ impl App {
                 self.answer_shown = false;
                 self.scroll = 0;
                 self.deck_finished = false;
+                self.refresh_review_counts();
                 self.status = Some("Undone — re-grade this card".to_string());
             }
             Ok(false) => {

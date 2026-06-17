@@ -159,6 +159,17 @@ fn count_span(n: u32, color: Color) -> Span<'static> {
     Span::styled(format!("{n:>w$}", w = COUNT_WIDTH), style)
 }
 
+/// A compact colored count for the review title bar; zero is dimmed so non-zero
+/// counts stand out, matching the deck list's `count_span`.
+fn review_count_span(n: u32, color: Color) -> Span<'static> {
+    let style = if n == 0 {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(color)
+    };
+    Span::styled(n.to_string(), style)
+}
+
 fn render_review(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -169,8 +180,10 @@ fn render_review(frame: &mut Frame, app: &mut App) {
         ])
         .split(frame.area());
 
-    // Title bar.
-    let title = Line::from(vec![
+    // Title bar: deck name + question/answer marker on the left, the deck's
+    // remaining new/learn/review counts right-aligned (colored like the decks
+    // view: new = blue, learn = red, review = green), as Anki's reviewer shows.
+    let left = vec![
         Span::styled(
             format!(" {} ", app.deck_name),
             Style::default()
@@ -182,8 +195,22 @@ fn render_review(frame: &mut Frame, app: &mut App) {
         } else {
             " [question] "
         }),
-    ]);
-    frame.render_widget(Paragraph::new(title), chunks[0]);
+    ];
+    let c = &app.review_counts;
+    let counts = vec![
+        review_count_span(c.new, Color::Blue),
+        Span::raw(" "),
+        review_count_span(c.learn, Color::Red),
+        Span::raw(" "),
+        review_count_span(c.review, Color::Green),
+        Span::raw(" "),
+    ];
+    let span_len = |spans: &[Span]| spans.iter().map(|s| s.content.chars().count()).sum::<usize>();
+    let pad = (chunks[0].width as usize).saturating_sub(span_len(&left) + span_len(&counts));
+    let mut title = left;
+    title.push(Span::raw(" ".repeat(pad)));
+    title.extend(counts);
+    frame.render_widget(Paragraph::new(Line::from(title)), chunks[0]);
 
     if app.deck_finished {
         let done = Paragraph::new("\n🎉 No more cards due in this deck.")

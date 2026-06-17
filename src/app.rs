@@ -87,6 +87,9 @@ pub struct App {
 
     // Review state.
     pub deck_name: String,
+    /// Remaining new/learn/review counts for the deck under review, shown in the
+    /// title bar like Anki's reviewer. Refreshed each time a card loads.
+    pub review_counts: DeckCounts,
     pub card: Option<ReviewCard>,
     pub answer_shown: bool,
     pub scroll: u16,
@@ -130,6 +133,7 @@ impl App {
             search: String::new(),
             searching: false,
             deck_name: String::new(),
+            review_counts: DeckCounts::default(),
             card: None,
             answer_shown: false,
             scroll: 0,
