@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui_image::StatefulImage;
 
 use crate::anki::DeckCounts;
-use crate::app::{App, CardStats, DeckStats, GRADE_LABELS, Screen};
+use crate::app::{App, CardStats, DeckStats, GRADE_LABELS, Screen, StudiedToday};
 use crate::media::{Block as ContentBlock, SideMedia, render_html};
 
 /// Width reserved by the list's highlight gutter (selection shown via bg color,
@@ -126,9 +126,26 @@ fn render_deck_list(frame: &mut Frame, app: &mut App) {
         ]);
         frame.render_widget(Paragraph::new(search_line), chunks[1]);
     } else {
-        let hint = footer("", app.status.as_deref());
+        // Footer doubles as Anki's "studied today" line when there's no status.
+        let studied = studied_today_line(app.studied_today);
+        let hint = footer(&studied, app.status.as_deref());
         frame.render_widget(hint, chunks[1]);
     }
+}
+
+/// Anki's deck-screen activity line, e.g.
+/// `Studied 31 cards in 12.15 minutes today (23.52s/card)`.
+fn studied_today_line(studied: StudiedToday) -> String {
+    if studied.cards == 0 {
+        return "No cards studied today".to_string();
+    }
+    let secs = studied.total_ms as f64 / 1000.0;
+    let minutes = secs / 60.0;
+    let per_card = secs / studied.cards as f64;
+    format!(
+        "Studied {} cards in {minutes:.2} minutes today ({per_card:.2}s/card)",
+        studied.cards
+    )
 }
 
 /// Build a deck-list row: indentation + fold marker + label on the left, then

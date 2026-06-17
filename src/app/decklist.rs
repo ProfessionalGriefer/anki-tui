@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use super::persist::{load_decks, save_collapsed};
-use super::{App, DeckInfo, DeckStats, Screen};
+use super::{App, DeckInfo, DeckStats, Screen, StudiedToday};
 
 /// How many rows `Ctrl-d`/`Ctrl-u` jump in the deck list.
 const PAGE_JUMP: usize = 10;
@@ -284,6 +284,29 @@ impl App {
             }
             Err(e) => self.status = Some(e.to_string()),
         }
+        self.refresh_studied_today();
+    }
+
+    /// Recompute today's collection-wide review activity for the footer. The
+    /// count comes from `getNumCardsReviewedToday`; the time is summed from the
+    /// most recent that-many revlog entries among cards rated today (all of
+    /// today's reviews live on `rated:1` cards). Best-effort — leaves zeros on
+    /// failure.
+    pub fn refresh_studied_today(&mut self) {
+        let count = self.anki.num_cards_reviewed_today().unwrap_or(0);
+        if count <= 0 {
+            self.studied_today = StudiedToday::default();
+            return;
+        }
+        let ids = self.anki.find_cards("rated:1").unwrap_or_default();
+        let mut reviews = self.anki.reviews_of_cards(&ids).unwrap_or_default();
+        // Newest first, then sum the time of today's `count` reviews.
+        reviews.sort_by_key(|r| std::cmp::Reverse(r.id));
+        let total_ms = reviews.iter().take(count as usize).map(|r| r.time).sum();
+        self.studied_today = StudiedToday {
+            cards: count as u32,
+            total_ms,
+        };
     }
 
     /// Start reviewing the highlighted deck.

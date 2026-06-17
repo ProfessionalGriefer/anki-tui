@@ -73,6 +73,15 @@ pub struct DeckStats {
     pub rows: Vec<(String, String)>,
 }
 
+/// Today's review activity for the deck-list footer, mirroring Anki's
+/// "Studied N cards in T minutes today (Xs/card)" line. `cards` counts reviews
+/// (revlog entries), `total_ms` is the time spent on them.
+#[derive(Default, Clone, Copy)]
+pub struct StudiedToday {
+    pub cards: u32,
+    pub total_ms: i64,
+}
+
 pub struct App {
     pub anki: AnkiConnect,
     pub picker: Picker,
@@ -85,6 +94,8 @@ pub struct App {
     pub collapsed: HashSet<String>,
     /// When true, show a flat list of full deck names instead of the fold tree.
     pub flat_view: bool,
+    /// Collection-wide review activity today, shown in the deck-list footer.
+    pub studied_today: StudiedToday,
     /// True after a lone `g`, so the next `g` completes a vim `gg` (jump to top).
     pub pending_g: bool,
     /// Case-insensitive substring filter for the deck list.
@@ -130,7 +141,7 @@ impl App {
         // Restore the saved fold state, or default to collapsing every parent
         // (so only top-level decks show on first launch).
         let collapsed = load_collapsed().unwrap_or_else(|| default_collapsed(&decks));
-        Ok(Self {
+        let mut app = Self {
             anki,
             picker,
             screen: Screen::DeckList,
@@ -138,6 +149,7 @@ impl App {
             deck_selected: 0,
             collapsed,
             flat_view: false,
+            studied_today: StudiedToday::default(),
             pending_g: false,
             search: String::new(),
             searching: false,
@@ -155,7 +167,9 @@ impl App {
             help_open: false,
             status: None,
             should_quit: false,
-        })
+        };
+        app.refresh_studied_today();
+        Ok(app)
     }
 
     pub fn toggle_help(&mut self) {

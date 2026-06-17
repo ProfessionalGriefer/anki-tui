@@ -257,6 +257,21 @@ impl AnkiConnect {
         Ok(map.drain().next().map(|(_, v)| v).unwrap_or_default())
     }
 
+    /// Number of reviews logged so far in the current Anki day (respects the
+    /// collection's rollover hour). This counts revlog entries, not unique cards.
+    pub fn num_cards_reviewed_today(&self) -> Result<i64> {
+        let result = self.invoke("getNumCardsReviewedToday", Value::Null)?;
+        Ok(result.as_i64().unwrap_or(0))
+    }
+
+    /// Full review history for many cards at once, flattened across cards
+    /// (`getReviewsOfCards`). Order is not guaranteed; sort by `id` if needed.
+    pub fn reviews_of_cards(&self, card_ids: &[i64]) -> Result<Vec<ReviewEntry>> {
+        let result = self.invoke("getReviewsOfCards", json!({ "cards": card_ids }))?;
+        let map: HashMap<String, Vec<ReviewEntry>> = serde_json::from_value(result)?;
+        Ok(map.into_values().flatten().collect())
+    }
+
     /// Synchronize the local collection with AnkiWeb (uses Anki's saved login).
     pub fn sync(&self) -> Result<()> {
         self.invoke("sync", Value::Null)?;
