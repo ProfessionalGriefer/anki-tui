@@ -180,22 +180,16 @@ fn render_review(frame: &mut Frame, app: &mut App) {
         ])
         .split(frame.area());
 
-    // Title bar: deck name + question/answer marker on the left, the deck's
-    // remaining new/learn/review counts right-aligned (colored like the decks
-    // view: new = blue, learn = red, review = green), as Anki's reviewer shows.
-    let left = vec![
-        Span::styled(
-            format!(" {} ", app.deck_name),
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(Color::Cyan),
-        ),
-        Span::raw(if app.answer_shown {
-            " [answer] "
-        } else {
-            " [question] "
-        }),
-    ];
+    // Title bar: deck name on the left, the deck's remaining new/learn/review
+    // counts right-aligned (colored like the decks view: new = blue, learn =
+    // red, review = green), as Anki's reviewer shows. Which side is shown is
+    // already indicated by the card box's Question/Answer title.
+    let left = vec![Span::styled(
+        format!(" {} ", app.deck_name),
+        Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Cyan),
+    )];
     let c = &app.review_counts;
     let counts = vec![
         review_count_span(c.new, Color::Blue),
