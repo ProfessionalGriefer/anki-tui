@@ -44,6 +44,30 @@ no card creation, no browser, and no statistics — just decks and reviews.
 
 ## Installation
 
+### Homebrew (macOS arm64)
+
+The easiest way on Apple Silicon. Installs a prebuilt binary from the personal
+tap:
+
+```sh
+brew install professionalgriefer/tap/anki-tui
+```
+
+Or tap first, then install:
+
+```sh
+brew tap professionalgriefer/tap
+brew install anki-tui
+```
+
+Upgrade later with `brew upgrade anki-tui`.
+
+> The tap ships a macOS arm64 binary only. On Intel Macs or other platforms,
+> build from source (below). Maintainer notes on cutting releases live in
+> [brew.md](brew.md).
+
+### From source
+
 ```sh
 git clone <this-repo>
 cd anki-tui
